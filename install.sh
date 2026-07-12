@@ -1,47 +1,112 @@
 #!/data/data/com.termux/files/usr/bin/bash
-#
-# install.sh
-# Script instalasi GitHub Manager Termux v1.0
-# Hanya dipakai untuk proses install (bukan logic utama aplikasi).
-# Semua logic aplikasi ada di github-manager.py (Python).
 
 set -e
 
-echo "=== GitHub Manager Termux - Instalasi ==="
+GREEN="\033[0;32m"
+YELLOW="\033[1;33m"
+RED="\033[0;31m"
+BLUE="\033[0;34m"
+NC="\033[0m"
 
-# 1. Update paket Termux
-echo "[1/5] Memperbarui daftar paket..."
-pkg update -y
+echo -e "${BLUE}"
+echo "========================================="
+echo "     GitHub Manager Installer v1.0"
+echo "========================================="
+echo -e "${NC}"
 
-# 2. Install dependency sistem: python, git, unzip, zip
-echo "[2/5] Menginstall python, git, unzip, zip..."
-pkg install -y python git unzip zip
+check_install() {
+    local CMD=$1
+    local PKG=$2
 
-# 3. Pastikan pip tersedia dan terupdate
-echo "[3/5] Menyiapkan pip..."
-python -m ensurepip --upgrade 2>/dev/null || true
-pip install --upgrade pip
+    if command -v "$CMD" >/dev/null 2>&1; then
+        echo -e "${GREEN}[✓] $PKG sudah terinstall${NC}"
+    else
+        echo -e "${YELLOW}[...] Menginstall $PKG${NC}"
+        pkg install -y "$PKG" || {
+            echo -e "${RED}[✗] Gagal menginstall $PKG${NC}"
+        }
+    fi
+}
 
-# 4. Install dependency python
-echo "[4/5] Menginstall dependency Python (rich, colorama, questionary)..."
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-pip install -r "$SCRIPT_DIR/requirements.txt"
+echo
+echo "== Mengecek Dependency =="
 
-# 5. Buat command 'github-manager' agar bisa dipanggil dari mana saja
-echo "[5/5] Membuat command 'github-manager'..."
-BIN_DIR="$PREFIX/bin"
-LAUNCHER="$BIN_DIR/github-manager"
+check_install python python
+check_install git git
+check_install unzip unzip
 
-cat > "$LAUNCHER" << EOF
-#!/data/data/com.termux/files/usr/bin/bash
-python "$SCRIPT_DIR/github-manager.py" "\$@"
+echo
+echo "== Mengecek ZIP =="
+
+if command -v zip >/dev/null 2>&1; then
+    echo -e "${GREEN}[✓] zip sudah tersedia${NC}"
+else
+    echo -e "${YELLOW}[!] zip tidak tersedia${NC}"
+    pkg install -y zip || \
+    echo -e "${YELLOW}[!] Lewati install zip (Backup ZIP dinonaktifkan)${NC}"
+fi
+
+echo
+echo "== Upgrade PIP =="
+
+python -m pip install --upgrade pip
+
+echo
+echo "== Install Library Python =="
+
+python -m pip install -r requirements.txt
+
+echo
+echo "== Verifikasi Module =="
+
+MODULES=("rich" "questionary" "colorama")
+
+for MOD in "${MODULES[@]}"
+do
+
+python - <<EOF
+import importlib,sys
+try:
+    importlib.import_module("$MOD")
+    print("OK")
+except:
+    sys.exit(1)
 EOF
 
-chmod +x "$LAUNCHER"
+if [ $? -eq 0 ]; then
+    echo -e "${GREEN}[✓] $MOD${NC}"
+else
+    echo -e "${YELLOW}[!] Menginstall $MOD${NC}"
+    python -m pip install "$MOD"
+fi
 
-# Pastikan folder yang dibutuhkan aplikasi sudah ada
-mkdir -p "$SCRIPT_DIR/config" "$SCRIPT_DIR/logs" "$SCRIPT_DIR/backup"
+done
 
-echo ""
-echo "=== Instalasi selesai! ==="
-echo "Jalankan aplikasi dengan mengetik: github-manager"
+echo
+echo "== Membuat Folder =="
+
+mkdir -p backup
+mkdir -p logs
+mkdir -p config
+
+echo
+echo "== Mengecek Git =="
+
+git --version
+
+echo
+echo "== Mengecek Python =="
+
+python --version
+
+echo
+echo -e "${GREEN}"
+echo "========================================="
+echo " Instalasi Berhasil"
+echo "========================================="
+echo -e "${NC}"
+
+echo "Jalankan dengan:"
+echo
+echo "python github-manager.py"
+echo
