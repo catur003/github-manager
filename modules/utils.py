@@ -37,7 +37,7 @@ BACKUP_DIR: Path = BASE_DIR / "backup"
 CONFIG_FILE: Path = CONFIG_DIR / "config.json"
 
 # Versi aplikasi saat ini & lokasi repo GitHub resmi (dipakai modules/update.py)
-APP_VERSION: str = "1.1.2"
+APP_VERSION: str = "1.1.3"
 GITHUB_REPO: str = "catur003/github-manager"
 
 
