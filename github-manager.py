@@ -17,8 +17,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import questionary  # noqa: E402
 from rich.console import Console  # noqa: E402
 
-from modules.utils import ensure_dirs  # noqa: E402
+from modules.utils import ensure_dirs, is_git_repo  # noqa: E402
+from modules.settings import load_config, save_config  # noqa: E402
 from modules.logger import log_activity, log_error, read_recent_activity, read_recent_debug  # noqa: E402
+import os
 from modules import (  # noqa: E402
     dashboard,
     repository,
@@ -84,6 +86,24 @@ def main() -> None:
     ensure_dirs()
     log_activity("Aplikasi dibuka")
 
+    # Recent Repository logic
+    config = load_config()
+    active_repo = config.get("active_repository", "")
+    if active_repo and is_git_repo(active_repo):
+        console.clear()
+        use_recent = questionary.confirm(
+            f"Repository terakhir: {os.path.basename(active_repo)}\nGunakan kembali?", default=True
+        ).ask()
+        if use_recent:
+            log_activity(f"Melanjutkan dengan repository terakhir: {active_repo}")
+        else:
+            # Kosongkan repo aktif dan biarkan user memilih repository lain
+            # lewat Repository Manager sebelum masuk ke menu utama.
+            config["active_repository"] = ""
+            save_config(config)
+            console.print("[cyan]Silakan pilih repository lain.[/cyan]")
+            repository.repository_manager()
+
     while True:
         console.clear()
         dashboard.show_dashboard()
@@ -100,7 +120,7 @@ def main() -> None:
 
         try:
             if pilihan.startswith("1."):
-                repository.menu()
+                repository.repository_manager()  # New Repository Manager
             elif pilihan.startswith("2."):
                 branch.menu()
             elif pilihan.startswith("3."):

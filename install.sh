@@ -14,7 +14,7 @@ echo "     GitHub Manager Installer v1.0"
 echo "========================================="
 echo -e "${NC}"
 
-check_install() {
+install_if_missing() {
     local CMD=$1
     local PKG=$2
 
@@ -29,22 +29,42 @@ check_install() {
 }
 
 echo
-echo "== Mengecek Dependency =="
+echo "== Detect Termux =="
 
-check_install python python
-check_install git git
-check_install unzip unzip
+if [[ -n "$TERMUX_VERSION" && "$TERMUX_VERSION" == *"googleplay"* ]]; then
+    echo -e "${YELLOW}WARNING"
+    echo "Anda menggunakan Termux Google Play."
+    echo "Disarankan menggunakan Termux GitHub/F-Droid."
+    echo "Installer tetap lanjut.${NC}"
+fi
 
 echo
-echo "== Mengecek ZIP =="
+echo "== Mengecek Dependency =="
 
-if command -v zip >/dev/null 2>&1; then
-    echo -e "${GREEN}[✓] zip sudah tersedia${NC}"
+install_if_missing python python
+install_if_missing git git
+install_if_missing unzip unzip
+
+install_if_missing zip zip
+
+echo
+echo "== GitHub CLI (opsional) =="
+if command -v gh >/dev/null 2>&1; then
+    echo -e "${GREEN}[✓] gh sudah terinstall${NC}"
 else
-    echo -e "${YELLOW}[!] zip tidak tersedia${NC}"
-    pkg install -y zip || \
-    echo -e "${YELLOW}[!] Lewati install zip (Backup ZIP dinonaktifkan)${NC}"
+    read -p "Install GitHub CLI? [Y/n] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
+        pkg install -y gh || echo -e "${YELLOW}[!] GitHub CLI dilewati${NC}"
+    else
+        echo -e "${YELLOW}[!] GitHub CLI dilewati${NC}"
+    fi
 fi
+
+echo
+echo "== Update Packages =="
+pkg update -y || true
+pkg upgrade -y || true
 
 echo
 echo "== Upgrade PIP =="
@@ -100,13 +120,19 @@ echo "== Mengecek Python =="
 python --version
 
 echo
+echo "== Permission =="
+chmod +x install.sh
+chmod +x github-manager.py
+
+echo
 echo -e "${GREEN}"
 echo "========================================="
-echo " Instalasi Berhasil"
+echo " ✓ Install selesai"
 echo "========================================="
 echo -e "${NC}"
 
-echo "Jalankan dengan:"
+echo "Cara menjalankan:"
 echo
 echo "python github-manager.py"
+echo "atau github-manager (setelah setup command jika ada)"
 echo

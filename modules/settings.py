@@ -7,6 +7,8 @@ Tidak ada hardcode path - semua path dibaca dari utils.CONFIG_FILE.
 """
 
 import json
+import os
+from datetime import datetime
 from typing import Any, Dict
 
 import questionary
@@ -82,6 +84,57 @@ def save_config(config: Dict[str, Any]) -> bool:
         return False
 
 
+def add_to_repositories(repo_path: str) -> None:
+    """Tambah atau update repo ke daftar repositories di config."""
+    config = load_config()
+    repos = config.setdefault("repositories", [])
+    repo_path = os.path.abspath(repo_path)
+    # Update existing or add new
+    for r in repos:
+        if r.get("path") == repo_path:
+            r["last_open"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+            break
+    else:
+        repos.append({
+            "path": repo_path,
+            "last_open": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "favorite": False
+        })
+    config["repositories"] = repos
+    save_config(config)
+
+
+def get_repositories() -> list:
+    """Ambil daftar repositories dari config, sorted by last_open."""
+    config = load_config()
+    repos = config.get("repositories", [])
+    # Sort by last_open desc
+    return sorted(repos, key=lambda x: x.get("last_open", ""), reverse=True)
+
+
+def toggle_favorite(repo_path: str) -> None:
+    """Toggle favorite status."""
+    config = load_config()
+    repos = config.setdefault("repositories", [])
+    repo_path = os.path.abspath(repo_path)
+    for r in repos:
+        if r.get("path") == repo_path:
+            r["favorite"] = not r.get("favorite", False)
+            break
+    save_config(config)
+
+
+def remove_from_repositories(repo_path: str) -> None:
+    """Hapus dari daftar (tidak hapus folder). Kalau repo ini sedang aktif, kosongkan juga."""
+    config = load_config()
+    repos = config.get("repositories", [])
+    repo_path = os.path.abspath(repo_path)
+    config["repositories"] = [r for r in repos if r.get("path") != repo_path]
+    if config.get("active_repository") == repo_path:
+        config["active_repository"] = ""
+    save_config(config)
+
+
 def show_settings_table(config: Dict[str, Any]) -> None:
     table = Table(title="Pengaturan Saat Ini", show_header=True, header_style="bold cyan")
     table.add_column("Pengaturan")
@@ -114,6 +167,7 @@ def menu() -> None:
                 "Toggle Konfirmasi Delete",
                 "Toggle Konfirmasi Force Push",
                 "Tema Warna",
+                "GitHub Account",
                 "? Help",
                 "Kembali",
             ],
@@ -182,7 +236,132 @@ def menu() -> None:
                 config["tema"] = tema
                 save_config(config)
                 log_activity(f"Tema warna diubah menjadi {tema}")
+        elif choice == "GitHub Account":
+            github_account_menu()
 
+
+def _gh_available() -> bool:
+    import shutil
+    return shutil.which("gh") is not None
+
+
+def _get_gh_login_status():
+    """Cek status login GitHub CLI. Return (is_logged_in, username_or_None)."""
+    import subprocess
+    if not _gh_available():
+        return False, None
+    try:
+        result = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True, timeout=15)
+        logged_in = result.returncode == 0
+        username = None
+        if logged_in:
+            out = (result.stdout or "") + (result.stderr or "")
+            for line in out.splitlines():
+                if "Logged in to" in line and "as" in line:
+                    try:
+                        username = line.split(" as ")[-1].split(" ")[0].strip("()")
+                    except Exception:
+                        username = None
+        return logged_in, username
+    except Exception:
+        return False, None
+
+
+def _get_credential_helper() -> str:
+    ok, out, _ = run_git(["config", "--global", "credential.helper"])
+    return out.strip() if ok and out.strip() else ""
+
+
+def github_account_menu() -> None:
+    """Login Manager - status login GitHub, kelola akun, dan test koneksi."""
+    while True:
+        console.rule("[bold cyan]GitHub Account")
+        config = load_config()
+        active_repo = config.get("active_repository", "")
+
+        logged_in, gh_user = _get_gh_login_status()
+        cred_helper = _get_credential_helper()
+        git_name = run_git(["config", "--get", "user.name"])[1].strip()
+
+        console.print(f"Status Login: {'[green]Logged in[/green]' if logged_in else '[yellow]Belum login[/yellow]'}")
+        console.print(f"Username: {gh_user or git_name or '-'}")
+        console.print(f"Credential Helper: {cred_helper or '[yellow]Belum aktif[/yellow]'}")
+        console.print(f"Repository Aktif: {active_repo or '-'}")
+        if active_repo and os.path.isdir(active_repo):
+            ok, branch, _ = run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=active_repo)
+            console.print(f"Branch Aktif: {branch.strip() if ok and branch.strip() else '-'}")
+        else:
+            console.print("Branch Aktif: -")
+
+        if not cred_helper:
+            aktifkan = questionary.confirm(
+                "Credential helper belum aktif. Aktifkan sekarang agar login tidak perlu diulang terus?",
+                default=False,
+            ).ask()
+            if aktifkan:
+                ok, _out, err = run_git(["config", "--global", "credential.helper", "store"])
+                if ok:
+                    console.print("[green]Credential helper diaktifkan.[/green]")
+                    log_activity("Credential helper diaktifkan")
+                else:
+                    console.print(f"[red]Gagal mengaktifkan credential helper: {err}[/red]")
+
+        choice = questionary.select(
+            "Aksi:", choices=["Login", "Logout", "Ganti Akun", "Test Login", "Kembali"]
+        ).ask()
+
+        if choice is None or choice == "Kembali":
+            return
+
+        if choice == "Login":
+            _do_login()
+        elif choice == "Logout":
+            _do_logout()
+        elif choice == "Ganti Akun":
+            console.print("[cyan]Logout dari akun saat ini, lalu login dengan akun baru.[/cyan]")
+            _do_logout()
+            _do_login()
+        elif choice == "Test Login":
+            _do_test_login(active_repo)
+
+        questionary.text("\nTekan Enter untuk kembali...").ask()
+
+
+def _do_login() -> None:
+    if _gh_available():
+        console.print("[cyan]Membuka proses login GitHub CLI (gh auth login)...[/cyan]")
+        os.system("gh auth login")
+        log_activity("Login GitHub via gh CLI dijalankan")
+    else:
+        console.print(
+            "[yellow]GitHub CLI (gh) tidak terpasang.[/yellow]\n"
+            "Login manual: saat push/pull pertama kali, git akan minta username & "
+            "Personal Access Token (PAT). Aktifkan credential helper di menu ini "
+            "supaya kredensial tersimpan."
+        )
+
+
+def _do_logout() -> None:
+    if _gh_available():
+        os.system("gh auth logout")
+        log_activity("Logout GitHub via gh CLI dijalankan")
+    else:
+        console.print(
+            "[yellow]GitHub CLI (gh) tidak terpasang.[/yellow]\n"
+            "Untuk logout manual, hapus kredensial tersimpan, misalnya:\n"
+            "git credential-store --file ~/.git-credentials erase"
+        )
+
+
+def _do_test_login(active_repo: str) -> None:
+    if not active_repo or not os.path.isdir(active_repo):
+        console.print("[yellow]Belum ada repository aktif untuk dites. Pilih repository dulu.[/yellow]")
+        return
+    ok, out, err = run_git(["ls-remote", "origin"], cwd=active_repo)
+    if ok:
+        console.print("[green]Test login berhasil, koneksi ke remote OK.[/green]")
+    else:
+        console.print(f"[red]Test gagal: {err or out}[/red]")
 
 def show_help() -> None:
     console.print(
