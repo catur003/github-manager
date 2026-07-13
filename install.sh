@@ -28,6 +28,22 @@ install_if_missing() {
     fi
 }
 
+# Termux/Python versi baru menandai environment sebagai "externally managed"
+# (PEP 668), jadi 'pip install' biasa ditolak dengan error
+# "externally-managed-environment". Coba pakai --break-system-packages dulu;
+# kalau pip-nya versi lama dan gak kenal flag itu, fallback ke cara biasa.
+pip_install() {
+    if python -m pip install --break-system-packages "$@" 2>/tmp/gm_pip_err.log; then
+        return 0
+    fi
+    if grep -qi "externally-managed-environment\|no such option" /tmp/gm_pip_err.log 2>/dev/null; then
+        python -m pip install "$@"
+    else
+        cat /tmp/gm_pip_err.log
+        return 1
+    fi
+}
+
 echo
 echo "== Detect Termux =="
 
@@ -69,12 +85,12 @@ pkg upgrade -y || true
 echo
 echo "== Upgrade PIP =="
 
-python -m pip install --upgrade pip
+pip_install --upgrade pip
 
 echo
 echo "== Install Library Python =="
 
-python -m pip install -r requirements.txt
+pip_install -r requirements.txt
 
 echo
 echo "== Verifikasi Module =="
@@ -97,7 +113,7 @@ if [ $? -eq 0 ]; then
     echo -e "${GREEN}[✓] $MOD${NC}"
 else
     echo -e "${YELLOW}[!] Menginstall $MOD${NC}"
-    python -m pip install "$MOD"
+    pip_install "$MOD"
 fi
 
 done

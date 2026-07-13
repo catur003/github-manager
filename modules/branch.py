@@ -73,7 +73,16 @@ def checkout_branch() -> None:
         return
     ok, out, err = run_git(["checkout", pilihan], cwd=repo)
     if not ok:
-        console.print(f"[red]Checkout gagal: {_friendly(err)}[/red]")
+        if "would be overwritten by checkout" in err:
+            console.print(
+                "[red]Checkout gagal:[/red] ada file yang belum di-commit dan bakal ketimpa "
+                "(biasanya config/config.json atau logs/*.log - file runtime yang berubah "
+                "tiap app jalan).\n"
+                "[yellow]Solusi: commit dulu perubahan itu (menu Commit), atau kalau memang "
+                "gak penting, jalankan manual: git checkout -- <nama file>[/yellow]"
+            )
+        else:
+            console.print(f"[red]Checkout gagal: {_friendly(err)}[/red]")
         log_error("Checkout branch gagal", raw_detail=err)
         return
     console.print(f"[green]Berhasil pindah ke branch '{pilihan}'.[/green]")

@@ -37,7 +37,7 @@ BACKUP_DIR: Path = BASE_DIR / "backup"
 CONFIG_FILE: Path = CONFIG_DIR / "config.json"
 
 # Versi aplikasi saat ini & lokasi repo GitHub resmi (dipakai modules/update.py)
-APP_VERSION: str = "1.1.1"
+APP_VERSION: str = "1.0.1"
 GITHUB_REPO: str = "catur003/github-manager"
 
 
@@ -197,9 +197,12 @@ def human_size(num_bytes: float) -> str:
 
 
 def count_files_in_dir(path: str) -> int:
-    """Hitung jumlah file (bukan folder) di dalam path secara rekursif."""
+    """Hitung jumlah file (bukan folder) di dalam path secara rekursif.
+    Folder .git dikecualikan karena isinya ratusan file internal git
+    (objects/refs) yang bukan bagian dari file project."""
     total = 0
-    for _root, _dirs, files in os.walk(path):
+    for root, dirs, files in os.walk(path):
+        dirs[:] = [d for d in dirs if d != ".git"]
         total += len(files)
     return total
 

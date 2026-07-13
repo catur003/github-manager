@@ -1,0 +1,14 @@
+# File runtime yang berubah tiap kali app dijalankan - JANGAN di-commit.
+# Kalau ini ikut ke-track, checkout/pindah branch bisa gagal karena git
+# nolak menimpa perubahan lokal yang belum di-commit di file ini.
+config/config.json
+logs/*.log
+backup/*.zip
+
+# Tapi tetap pertahankan folder-nya (biar ada di fresh clone)
+!config/.gitkeep
+!logs/.gitkeep
+!backup/.gitkeep
+
+__pycache__/
+*.pyc

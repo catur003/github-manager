@@ -245,7 +245,7 @@ def _confirm_zip_changes(tambah: int, update: int, delete: int) -> bool:
     table.add_column("Jumlah")
     table.add_row("Tambah", str(tambah))
     table.add_row("Update", str(update))
-    table.add_row("Delete (opsional, file lama yang gak ada di ZIP)", str(delete))
+    table.add_row("Delete (info saja, TIDAK dihapus otomatis)", str(delete))
     console.print(table)
     return bool(questionary.confirm("Lanjutkan ekstrak?", default=True).ask())
 
@@ -330,7 +330,12 @@ def upload_zip_extract() -> None:
         return
 
     files_after = count_files_in_dir(repo)
-    _tampilkan_ringkasan_upload(repo, files_before, files_after, extra_label="Upload ZIP (Extract)")
+    # delete selalu 0 di sini: ekstrak ZIP TIDAK PERNAH menghapus file yang
+    # gak ada di ZIP (baris "Delete" di Preview cuma informasi, bukan aksi).
+    _tampilkan_ringkasan_upload(
+        repo, files_before, files_after, extra_label="Upload ZIP (Extract)",
+        override_counts=(tambah, update, 0),
+    )
     log_activity("Upload ZIP (Extract) berhasil")
 
 
@@ -432,20 +437,29 @@ def upload_folder() -> None:
 
 
 def _tampilkan_ringkasan_upload(repo: str, files_before: int, files_after: int,
-                                 extra_label: str = "Upload") -> None:
+                                 extra_label: str = "Upload",
+                                 override_counts: Optional[Tuple[int, int, int]] = None) -> None:
+    """override_counts, kalau diisi (added, modified, deleted), dipakai
+    langsung tanpa hitung ulang dari 'git status' - dipakai Upload ZIP
+    (Extract) supaya angkanya konsisten dengan tabel Preview Perubahan ZIP,
+    dan gak ketimpa status git lain yang gak terkait aksi ini."""
     ok, branch, _err = run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo)
     branch = branch if ok else "-"
-    ok, status_out, _err = run_git(["status", "--porcelain"], cwd=repo)
-    added = modified = deleted = 0
-    if ok:
-        for line in status_out.splitlines():
-            code = line[:2]
-            if "A" in code or "?" in code:
-                added += 1
-            elif "M" in code:
-                modified += 1
-            elif "D" in code:
-                deleted += 1
+
+    if override_counts is not None:
+        added, modified, deleted = override_counts
+    else:
+        ok, status_out, _err = run_git(["status", "--porcelain"], cwd=repo)
+        added = modified = deleted = 0
+        if ok:
+            for line in status_out.splitlines():
+                code = line[:2]
+                if "A" in code or "?" in code:
+                    added += 1
+                elif "M" in code:
+                    modified += 1
+                elif "D" in code:
+                    deleted += 1
 
     table = Table(title=f"Ringkasan Setelah {extra_label}", header_style="bold cyan")
     table.add_column("Info")

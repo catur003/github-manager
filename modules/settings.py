@@ -330,8 +330,10 @@ def github_account_menu() -> None:
 def _do_login() -> None:
     if _gh_available():
         console.print("[cyan]Membuka proses login GitHub CLI (gh auth login)...[/cyan]")
-        os.system("gh auth login")
+        exit_code = os.system("gh auth login")
         log_activity("Login GitHub via gh CLI dijalankan")
+        if exit_code == 0:
+            _auto_isi_identitas_dari_gh()
     else:
         console.print(
             "[yellow]GitHub CLI (gh) tidak terpasang.[/yellow]\n"
@@ -339,6 +341,51 @@ def _do_login() -> None:
             "Personal Access Token (PAT). Aktifkan credential helper di menu ini "
             "supaya kredensial tersimpan."
         )
+
+
+def _auto_isi_identitas_dari_gh() -> None:
+    """Setelah gh auth login berhasil, isi otomatis user.name/user.email git
+    kalau belum diatur, supaya commit gak gagal gara-gara identitas kosong.
+    Login GitHub (autentikasi) dan identitas commit itu 2 hal terpisah di git,
+    jadi ini menjembatani biar user gak bingung."""
+    import subprocess
+
+    current_name = run_git(["config", "--get", "user.name"])[1].strip()
+    current_email = run_git(["config", "--get", "user.email"])[1].strip()
+    if current_name and current_email:
+        return  # sudah diatur, jangan timpa
+
+    try:
+        login = subprocess.run(["gh", "api", "user", "--jq", ".login"],
+                                capture_output=True, text=True, timeout=15).stdout.strip()
+        gh_name = subprocess.run(["gh", "api", "user", "--jq", ".name"],
+                                  capture_output=True, text=True, timeout=15).stdout.strip()
+        gh_id = subprocess.run(["gh", "api", "user", "--jq", ".id"],
+                                capture_output=True, text=True, timeout=15).stdout.strip()
+    except Exception:
+        return
+
+    if not login:
+        return
+
+    if not current_name:
+        nama = gh_name if gh_name and gh_name != "null" else login
+        run_git(["config", "--global", "user.name", nama])
+        config = load_config()
+        config["git_name"] = nama
+        save_config(config)
+        console.print(f"[green]Nama Git otomatis diisi dari akun GitHub: {nama}[/green]")
+
+    if not current_email and gh_id:
+        # Email publik GitHub sering disembunyikan, jadi pakai noreply email
+        # bawaan GitHub (aman dipakai untuk commit, gak expose email asli).
+        noreply = f"{gh_id}+{login}@users.noreply.github.com"
+        run_git(["config", "--global", "user.email", noreply])
+        config = load_config()
+        config["git_email"] = noreply
+        save_config(config)
+        console.print(f"[green]Email Git otomatis diisi (noreply GitHub): {noreply}[/green]")
+        console.print("[dim]Mau pakai email lain? Ubah di menu Pengaturan > Email Git.[/dim]")
 
 
 def _do_logout() -> None:
