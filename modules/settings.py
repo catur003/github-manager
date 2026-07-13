@@ -15,7 +15,7 @@ import questionary
 from rich.console import Console
 from rich.table import Table
 
-from modules.utils import CONFIG_FILE, ensure_dirs, run_git
+from modules.utils import CONFIG_FILE, ensure_dirs, run_git, spinner
 from modules.logger import log_activity, log_error
 
 console = Console()
@@ -246,7 +246,15 @@ def _gh_available() -> bool:
 
 
 def _get_gh_login_status():
-    """Cek status login GitHub CLI. Return (is_logged_in, username_or_None)."""
+    """Cek status login GitHub CLI. Return (is_logged_in, username_or_None).
+
+    Parsing mendukung 2 format output `gh auth status`:
+    - Lama : "Logged in to github.com as <user> (...)"
+    - Baru : "Logged in to github.com account <user> (keyring)" (gh >= 2.40,
+      kata "as" diganti "account" - ini penyebab username dulu gak
+      kedeteksi/gak auto-update di versi gh yang lebih baru.
+    """
+    import re
     import subprocess
     if not _gh_available():
         return False, None
@@ -256,12 +264,9 @@ def _get_gh_login_status():
         username = None
         if logged_in:
             out = (result.stdout or "") + (result.stderr or "")
-            for line in out.splitlines():
-                if "Logged in to" in line and "as" in line:
-                    try:
-                        username = line.split(" as ")[-1].split(" ")[0].strip("()")
-                    except Exception:
-                        username = None
+            m = re.search(r"Logged in to \S+ (?:as|account) (\S+)", out)
+            if m:
+                username = m.group(1).strip("()")
         return logged_in, username
     except Exception:
         return False, None
@@ -307,7 +312,7 @@ def github_account_menu() -> None:
                     console.print(f"[red]Gagal mengaktifkan credential helper: {err}[/red]")
 
         choice = questionary.select(
-            "Aksi:", choices=["Login", "Logout", "Ganti Akun", "Test Login", "Kembali"]
+            "Aksi:", choices=["Login", "Logout", "Ganti Akun", "Test Login", "Refresh dari GitHub", "Kembali"]
         ).ask()
 
         if choice is None or choice == "Kembali":
@@ -323,6 +328,8 @@ def github_account_menu() -> None:
             _do_login()
         elif choice == "Test Login":
             _do_test_login(active_repo)
+        elif choice == "Refresh dari GitHub":
+            _refresh_dari_github()
 
         questionary.text("\nTekan Enter untuk kembali...").ask()
 
@@ -386,6 +393,62 @@ def _auto_isi_identitas_dari_gh() -> None:
         save_config(config)
         console.print(f"[green]Email Git otomatis diisi (noreply GitHub): {noreply}[/green]")
         console.print("[dim]Mau pakai email lain? Ubah di menu Pengaturan > Email Git.[/dim]")
+
+
+def _refresh_dari_github() -> None:
+    """Refresh manual - ambil ulang nama & email dari akun GitHub yang lagi
+    login, lalu TIMPA config lokal (beda dari _auto_isi_identitas_dari_gh
+    yang cuma jalan sekali pas login & skip kalau udah keisi).
+    Ini jawaban buat kasus: user udah login lama, tapi nama/email di
+    aplikasi masih kosong/data lama dan gak ada cara refresh manual."""
+    import subprocess
+
+    if not _gh_available():
+        console.print("[yellow]GitHub CLI (gh) tidak terpasang, tidak bisa refresh otomatis.[/yellow]")
+        return
+    logged_in, _ = _get_gh_login_status()
+    if not logged_in:
+        console.print("[yellow]Belum login ke GitHub CLI. Login dulu sebelum refresh.[/yellow]")
+        return
+
+    with spinner("Mengambil data akun dari GitHub..."):
+        try:
+            login = subprocess.run(["gh", "api", "user", "--jq", ".login"],
+                                    capture_output=True, text=True, timeout=15).stdout.strip()
+            gh_name = subprocess.run(["gh", "api", "user", "--jq", ".name"],
+                                      capture_output=True, text=True, timeout=15).stdout.strip()
+            gh_id = subprocess.run(["gh", "api", "user", "--jq", ".id"],
+                                    capture_output=True, text=True, timeout=15).stdout.strip()
+        except Exception as e:  # noqa: BLE001
+            console.print("[red]Gagal mengambil data dari GitHub.[/red]")
+            log_error("Gagal refresh identitas dari GitHub", e)
+            return
+
+    if not login:
+        console.print("[red]Gagal mengambil username GitHub. Coba Test Login dulu.[/red]")
+        return
+
+    nama_baru = gh_name if gh_name and gh_name != "null" else login
+    email_baru = f"{gh_id}+{login}@users.noreply.github.com" if gh_id else ""
+
+    config = load_config()
+    console.print(
+        f"Nama Git  : {config.get('git_name') or '-'} -> [green]{nama_baru}[/green]\n"
+        f"Email Git : {config.get('git_email') or '-'} -> [green]{email_baru or '-'}[/green]"
+    )
+    lanjut = questionary.confirm("Timpa dengan data di atas?", default=True).ask()
+    if not lanjut:
+        console.print("[yellow]Refresh dibatalkan.[/yellow]")
+        return
+
+    run_git(["config", "--global", "user.name", nama_baru])
+    config["git_name"] = nama_baru
+    if email_baru:
+        run_git(["config", "--global", "user.email", email_baru])
+        config["git_email"] = email_baru
+    save_config(config)
+    console.print("[green]✓ Nama & Email berhasil di-refresh dari GitHub.[/green]")
+    log_activity("Identitas Git di-refresh manual dari GitHub")
 
 
 def _do_logout() -> None:
