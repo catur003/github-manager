@@ -15,6 +15,7 @@ console = Console()
 
 
 def _get_active_repo() -> str | None:
+    """Ambil path repository aktif dari config, atau None + pesan kalau belum dipilih."""
     config = load_config()
     repo = config.get("active_repository", "")
     if not repo:
@@ -24,6 +25,7 @@ def _get_active_repo() -> str | None:
 
 
 def _status_files(repo: str) -> list[tuple[str, str]]:
+    """Ambil daftar file yang berubah dari 'git status --porcelain'."""
     ok, out, _err = run_git(["status", "--porcelain"], cwd=repo)
     if not ok or not out:
         return []
@@ -36,6 +38,7 @@ def _status_files(repo: str) -> list[tuple[str, str]]:
 
 
 def tampilkan_status(repo: str) -> None:
+    """Tampilkan ringkasan file yang berubah di working tree."""
     files = _status_files(repo)
     if not files:
         console.print("[green]Tidak ada perubahan. Working tree bersih.[/green]")
@@ -49,6 +52,7 @@ def tampilkan_status(repo: str) -> None:
 
 
 def add_semua() -> None:
+    """Stage semua file yang berubah (git add .)."""
     repo = _get_active_repo()
     if not repo:
         return
@@ -63,6 +67,7 @@ def add_semua() -> None:
 
 
 def add_file_tertentu() -> None:
+    """Stage file tertentu yang dipilih user satu per satu."""
     repo = _get_active_repo()
     if not repo:
         return
@@ -85,6 +90,7 @@ def add_file_tertentu() -> None:
 
 
 def unstage() -> None:
+    """Batalkan staging (git restore --staged) untuk file yang dipilih."""
     repo = _get_active_repo()
     if not repo:
         return
@@ -108,6 +114,7 @@ def unstage() -> None:
 
 
 def refresh() -> None:
+    """Tampilkan ulang status branch/remote terkini."""
     repo = _get_active_repo()
     if not repo:
         return
@@ -159,6 +166,7 @@ def git_status_lengkap() -> None:
 
 
 def show_help() -> None:
+    """Tampilkan penjelasan singkat untuk menu ini."""
     console.print(
         "\n[bold cyan]Bantuan - Git Add[/bold cyan]\n"
         "- Add Semua: menambahkan semua perubahan ke staging area.\n"
@@ -170,6 +178,7 @@ def show_help() -> None:
 
 
 def menu() -> None:
+    """Tampilkan menu interaktif dan proses pilihan user."""
     while True:
         console.rule("[bold cyan]Git Add")
         choice = questionary.select(

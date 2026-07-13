@@ -15,6 +15,7 @@ console = Console()
 
 
 def _get_active_repo() -> str | None:
+    """Ambil path repository aktif dari config, atau None + pesan kalau belum dipilih."""
     config = load_config()
     repo = config.get("active_repository", "")
     if not repo:
@@ -24,6 +25,7 @@ def _get_active_repo() -> str | None:
 
 
 def _list_branches(repo: str) -> list[str]:
+    """Ambil daftar nama branch lokal di repository."""
     ok, out, _err = run_git(["branch", "--list"], cwd=repo)
     if not ok or not out:
         return []
@@ -36,6 +38,7 @@ def _list_branches(repo: str) -> list[str]:
 
 
 def lihat_branch() -> None:
+    """Tampilkan daftar branch lokal beserta penanda branch aktif."""
     repo = _get_active_repo()
     if not repo:
         return
@@ -57,6 +60,7 @@ def lihat_branch() -> None:
 
 
 def checkout_branch() -> None:
+    """Pindah (checkout) ke branch lain yang dipilih user."""
     repo = _get_active_repo()
     if not repo:
         return
@@ -77,6 +81,7 @@ def checkout_branch() -> None:
 
 
 def buat_branch_baru() -> None:
+    """Buat branch baru dari branch aktif saat ini."""
     repo = _get_active_repo()
     if not repo:
         return
@@ -93,6 +98,7 @@ def buat_branch_baru() -> None:
 
 
 def rename_branch() -> None:
+    """Ganti nama branch yang dipilih user."""
     repo = _get_active_repo()
     if not repo:
         return
@@ -112,6 +118,7 @@ def rename_branch() -> None:
 
 
 def delete_branch() -> None:
+    """Hapus branch lokal (dengan konfirmasi kalau belum ter-merge)."""
     repo = _get_active_repo()
     if not repo:
         return
@@ -146,10 +153,12 @@ def delete_branch() -> None:
 
 
 def refresh() -> None:
+    """Tampilkan ulang status branch/remote terkini."""
     lihat_branch()
 
 
 def _friendly(err: str) -> str:
+    """Ubah pesan error git mentah jadi pesan yang mudah dipahami user."""
     low = err.lower()
     if "not fully merged" in low:
         return "Branch belum sepenuhnya digabung (merge) ke branch lain."
@@ -161,6 +170,7 @@ def _friendly(err: str) -> str:
 
 
 def show_help() -> None:
+    """Tampilkan penjelasan singkat untuk menu ini."""
     console.print(
         "\n[bold cyan]Bantuan - Branch[/bold cyan]\n"
         "- Lihat Branch: menampilkan semua branch dan branch aktif saat ini.\n"
@@ -174,6 +184,7 @@ def show_help() -> None:
 
 
 def menu() -> None:
+    """Tampilkan menu interaktif dan proses pilihan user."""
     while True:
         console.rule("[bold cyan]Branch")
         choice = questionary.select(

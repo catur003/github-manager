@@ -16,6 +16,7 @@ console = Console()
 
 
 def _get_active_repo() -> str | None:
+    """Ambil path repository aktif dari config, atau None + pesan kalau belum dipilih."""
     config = load_config()
     repo = config.get("active_repository", "")
     if not repo:
@@ -25,6 +26,7 @@ def _get_active_repo() -> str | None:
 
 
 def buat_commit() -> None:
+    """Buat commit baru dari perubahan yang sudah di-stage, minta pesan commit."""
     repo = _get_active_repo()
     if not repo:
         return
@@ -47,6 +49,7 @@ def buat_commit() -> None:
 
 
 def commit_terakhir() -> None:
+    """Tampilkan detail commit paling akhir."""
     repo = _get_active_repo()
     if not repo:
         return
@@ -58,6 +61,7 @@ def commit_terakhir() -> None:
 
 
 def riwayat_commit() -> None:
+    """Tampilkan riwayat beberapa commit terakhir."""
     repo = _get_active_repo()
     if not repo:
         return
@@ -78,6 +82,7 @@ def riwayat_commit() -> None:
 
 
 def amend_commit() -> None:
+    """Ubah (amend) commit terakhir dengan perubahan/pesan baru."""
     repo = _get_active_repo()
     if not repo:
         return
@@ -102,6 +107,7 @@ def amend_commit() -> None:
 
 
 def _friendly(err: str) -> str:
+    """Ubah pesan error git mentah jadi pesan yang mudah dipahami user."""
     low = err.lower()
     if "nothing to commit" in low:
         return "Tidak ada perubahan untuk di-commit."
@@ -111,6 +117,7 @@ def _friendly(err: str) -> str:
 
 
 def show_help() -> None:
+    """Tampilkan penjelasan singkat untuk menu ini."""
     console.print(
         "\n[bold cyan]Bantuan - Commit[/bold cyan]\n"
         "- Buat Commit: menyimpan perubahan yang sudah di-add dengan sebuah pesan.\n"
@@ -122,6 +129,7 @@ def show_help() -> None:
 
 
 def menu() -> None:
+    """Tampilkan menu interaktif dan proses pilihan user."""
     while True:
         console.rule("[bold cyan]Commit")
         choice = questionary.select(

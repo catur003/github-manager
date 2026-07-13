@@ -85,6 +85,7 @@ MATERI = {
 
 
 def menu() -> None:
+    """Tampilkan menu interaktif dan proses pilihan user."""
     while True:
         console.rule("[bold cyan]Belajar Git")
         topik = questionary.select(

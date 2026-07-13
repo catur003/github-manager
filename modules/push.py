@@ -7,9 +7,10 @@ penjelasan Apa itu Push / Force Push.
 import questionary
 from rich.console import Console
 
-from modules.utils import run_git, confirm_text
-from modules.settings import load_config
+from modules.utils import run_git, confirm_text, spinner
+from modules.settings import load_config, record_repo_event
 from modules.logger import log_activity, log_error
+from modules import preflight
 
 console = Console()
 
@@ -27,22 +28,35 @@ def push() -> None:
     repo = _get_active_repo()
     if not repo:
         return
-    ok, branch, _err = run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo)
-    branch = branch if ok else "HEAD"
-    console.print(f"[cyan]Mengirim (push) branch '{branch}' ke remote...[/cyan]")
-    ok, out, err = run_git(["push", "origin", branch], cwd=repo, timeout=120)
+    if not preflight.preflight(repo, need_remote=True, need_upstream=True, label="Push"):
+        return
+    branch = preflight.get_current_branch(repo) or "HEAD"
+    with spinner(f"Mengirim (push) branch '{branch}' ke remote..."):
+        ok, out, err = run_git(["push", "origin", branch], cwd=repo, timeout=120)
     if not ok:
         console.print(f"[red]Push gagal: {_friendly(err)}[/red]")
         log_activity("Push gagal")
         log_error("Push gagal", raw_detail=err)
         return
-    console.print(f"[green]Push berhasil.[/green]\n{out}")
+    ok2, commit_hash, _e = run_git(["rev-parse", "--short", "HEAD"], cwd=repo)
+    console.print(
+        f"[green]✓ Push Berhasil[/green]\n\n"
+        f"Repository : {repo.rstrip('/').split('/')[-1]}\n"
+        f"Branch     : {branch}\n"
+        f"Commit     : {commit_hash if ok2 else '-'}\n"
+    )
     log_activity("Push berhasil")
+    record_repo_event(repo, "last_push")
+    run_git(["status", "--short"], cwd=repo)
+    run_git(["branch", "-vv"], cwd=repo)
+    run_git(["remote", "-v"], cwd=repo)
 
 
 def force_push() -> None:
     repo = _get_active_repo()
     if not repo:
+        return
+    if not preflight.preflight(repo, need_remote=True, need_upstream=False, label="Force Push"):
         return
     apa_itu_force_push()
     config = load_config()
@@ -55,7 +69,8 @@ def force_push() -> None:
             return
     ok, branch, _err = run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo)
     branch = branch if ok else "HEAD"
-    ok, out, err = run_git(["push", "--force", "origin", branch], cwd=repo, timeout=120)
+    with spinner(f"Force Push branch '{branch}' ke remote..."):
+        ok, out, err = run_git(["push", "--force", "origin", branch], cwd=repo, timeout=120)
     if not ok:
         console.print(f"[red]Force Push gagal: {_friendly(err)}[/red]")
         log_activity("Force Push gagal")
@@ -63,6 +78,7 @@ def force_push() -> None:
         return
     console.print(f"[green]Force Push berhasil.[/green]\n{out}")
     log_activity("Force Push berhasil")
+    record_repo_event(repo, "last_push")
 
 
 def apa_itu_push() -> None:

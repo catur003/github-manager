@@ -9,7 +9,7 @@ import os
 import questionary
 from rich.console import Console
 
-from modules.utils import run_git, is_git_repo, find_git_repos, GitError
+from modules.utils import run_git, is_git_repo, find_git_repos, normalize_repo_url, GitError, spinner
 from modules.settings import load_config, save_config
 from modules.logger import log_activity, log_error
 
@@ -62,34 +62,48 @@ def cari_repository_otomatis() -> None:
 
 
 def clone_repository() -> None:
-    """Clone repository dari URL remote."""
-    url = questionary.text("Masukkan URL repository yang ingin di-clone:").ask()
-    if not url:
+    """Clone repository dari URL remote (atau shorthand 'owner/repo')."""
+    raw = questionary.text(
+        "Masukkan URL repository atau 'owner/repo' (contoh: catur003/ZenStock):"
+    ).ask()
+    if not raw:
         return
+    url = normalize_repo_url(raw)
+
+    nama_default = url.rstrip("/").split("/")[-1].replace(".git", "")
     tujuan = questionary.text(
-        "Masukkan folder tujuan (kosongkan untuk folder default):", default=""
+        f"Masukkan folder tujuan (kosongkan untuk ~/{nama_default}):", default=""
     ).ask()
     if tujuan is None:
         return
-    args = ["clone", url]
+
+    # PRIORITAS 2 #5: repository HARUS di-clone ke ~/<nama>, bukan ikut cwd
+    # aplikasi (sebelumnya bisa jadi ~/github-manager/ZenStock kalau app
+    # dijalankan dari situ). Selalu resolve ke path absolut di HOME.
+    home = os.path.expanduser("~")
     if tujuan.strip():
-        args.append(tujuan.strip())
-    console.print("[cyan]Sedang melakukan clone...[/cyan]")
-    ok, out, err = run_git(args)
+        dest_path = tujuan.strip() if os.path.isabs(tujuan.strip()) else os.path.join(home, tujuan.strip())
+    else:
+        dest_path = os.path.join(home, nama_default)
+
+    if os.path.exists(dest_path) and os.listdir(dest_path):
+        console.print(f"[red]Folder '{dest_path}' sudah ada dan tidak kosong.[/red]")
+        return
+
+    with spinner(f"Sedang melakukan clone ke {dest_path}..."):
+        ok, out, err = run_git(["clone", url, dest_path])
     if not ok:
         console.print(f"[red]Clone gagal: {_human_git_error(err)}[/red]")
         log_error("Clone repository gagal", raw_detail=err)
         return
-    console.print(f"[green]Clone berhasil.[/green]\n{out}")
-    log_activity(f"Repository di-clone dari {url}")
+    console.print(f"[green]Clone berhasil ke {dest_path}.[/green]\n{out}")
+    log_activity(f"Repository di-clone dari {url} ke {dest_path}")
 
-    folder_name = tujuan.strip() if tujuan.strip() else url.rstrip("/").split("/")[-1].replace(".git", "")
-    if os.path.isdir(folder_name):
-        jadikan_aktif = questionary.confirm(
-            f"Jadikan '{folder_name}' sebagai repository aktif?", default=True
-        ).ask()
-        if jadikan_aktif:
-            _set_active_repository(folder_name)
+    jadikan_aktif = questionary.confirm(
+        f"Jadikan '{nama_default}' sebagai repository aktif?", default=True
+    ).ask()
+    if jadikan_aktif:
+        _set_active_repository(dest_path)
 
 
 def tambah_repository() -> None:

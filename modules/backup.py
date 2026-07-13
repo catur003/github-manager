@@ -22,6 +22,7 @@ console = Console()
 
 
 def _get_active_repo() -> str | None:
+    """Ambil path repository aktif dari config, atau None + pesan kalau belum dipilih."""
     config = load_config()
     repo = config.get("active_repository", "")
     if not repo:
@@ -62,6 +63,7 @@ def buat_backup_zip(repo_path: str, silent_label: str | None = None) -> str | No
 
 
 def backup_zip_menu() -> None:
+    """Menu untuk membuat backup ZIP secara manual."""
     repo = _get_active_repo()
     if not repo:
         return
@@ -70,11 +72,13 @@ def backup_zip_menu() -> None:
 
 
 def _list_backup_files() -> list[str]:
+    """Ambil daftar file backup ZIP yang sudah pernah dibuat."""
     ensure_dirs()
     return sorted([f for f in os.listdir(BACKUP_DIR) if f.lower().endswith(".zip")], reverse=True)
 
 
 def list_backup() -> None:
+    """Tampilkan daftar semua file backup yang tersedia."""
     files = _list_backup_files()
     if not files:
         console.print("[yellow]Belum ada backup tersimpan.[/yellow]")
@@ -89,6 +93,7 @@ def list_backup() -> None:
 
 
 def restore_zip() -> None:
+    """Pulihkan (restore) repository dari salah satu file backup ZIP."""
     repo = _get_active_repo()
     if not repo:
         return
@@ -124,6 +129,7 @@ def restore_zip() -> None:
 
 
 def hapus_backup() -> None:
+    """Hapus file backup ZIP yang dipilih user."""
     files = _list_backup_files()
     if not files:
         console.print("[yellow]Belum ada backup untuk dihapus.[/yellow]")
@@ -148,6 +154,7 @@ def hapus_backup() -> None:
 
 
 def show_help() -> None:
+    """Tampilkan penjelasan singkat untuk menu ini."""
     console.print(
         "\n[bold cyan]Bantuan - Backup[/bold cyan]\n"
         "- Backup ZIP: membuat salinan ZIP dari repository aktif ke folder backup/.\n"
@@ -159,6 +166,7 @@ def show_help() -> None:
 
 
 def menu() -> None:
+    """Tampilkan menu interaktif dan proses pilihan user."""
     while True:
         console.rule("[bold cyan]Backup")
         choice = questionary.select(
