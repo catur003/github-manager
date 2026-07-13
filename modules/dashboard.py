@@ -10,7 +10,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from modules.utils import run_git, is_git_repo, now_str
-from modules.settings import load_config
+from modules.settings import load_config, get_repo_event
 
 console = Console()
 
@@ -20,11 +20,15 @@ def get_status_summary(repo_path: str) -> dict:
     info = {
         "branch": "-",
         "remote": "-",
+        "upstream": "-",
+        "connected": "-",
         "status": "Tidak diketahui",
         "ahead": 0,
         "behind": 0,
         "last_commit": "-",
         "changed_files": 0,
+        "last_push": "-",
+        "last_pull": "-",
     }
     if not is_git_repo(repo_path):
         return info
@@ -39,17 +43,28 @@ def get_status_summary(repo_path: str) -> dict:
         parts = first_line.split()
         if len(parts) >= 2:
             info["remote"] = parts[1]
+    # PRIORITAS 4: field "Connected" - terhubung ke remote atau enggak
+    info["connected"] = "Ya" if info["remote"] != "-" else "Tidak (belum ada remote)"
 
-    ok, ahead_behind, _ = run_git(
-        ["rev-list", "--left-right", "--count", f"{info['branch']}...origin/{info['branch']}"],
-        cwd=repo_path,
+    ok, upstream, _ = run_git(
+        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], cwd=repo_path
     )
-    if ok and ahead_behind:
-        try:
-            left, right = ahead_behind.split()
-            info["ahead"], info["behind"] = int(left), int(right)
-        except ValueError:
-            pass
+    if ok and upstream:
+        # PRIORITAS 4: field "Upstream" terpisah dari ahead/behind
+        info["upstream"] = upstream
+        ok, ahead_behind, _ = run_git(
+            ["rev-list", "--left-right", "--count", f"HEAD...{upstream}"],
+            cwd=repo_path,
+        )
+        if ok and ahead_behind:
+            try:
+                left, right = ahead_behind.split()
+                info["ahead"], info["behind"] = int(left), int(right)
+            except ValueError:
+                pass
+    else:
+        info["upstream"] = "-"
+        info["ahead"] = info["behind"] = "-"  # belum ada upstream, bukan 0
 
     ok, last_commit, _ = run_git(["log", "-1", "--pretty=%h %s"], cwd=repo_path)
     if ok and last_commit:
@@ -60,6 +75,11 @@ def get_status_summary(repo_path: str) -> dict:
         lines = [l for l in status_out.splitlines() if l.strip()]
         info["changed_files"] = len(lines)
         info["status"] = "Bersih (tidak ada perubahan)" if not lines else f"{len(lines)} file berubah"
+
+    # PRIORITAS 4: Last Pull / Last Push - dicatat manual tiap kali sukses
+    # (bukan dari git, karena git gak nyimpen waktu pull/push lokal)
+    info["last_push"] = get_repo_event(repo_path, "last_push")
+    info["last_pull"] = get_repo_event(repo_path, "last_pull")
 
     return info
 
@@ -86,10 +106,14 @@ def show_dashboard() -> None:
     table.add_row("Lokasi Repository:", repo_path)
     table.add_row("Branch aktif:", info["branch"])
     table.add_row("Remote:", info["remote"])
+    table.add_row("Terhubung (Connected):", info["connected"])
+    table.add_row("Upstream:", info["upstream"])
     table.add_row("Status Git:", info["status"])
     table.add_row("Ahead / Behind:", f"{info['ahead']} ahead / {info['behind']} behind")
     table.add_row("Commit terakhir:", info["last_commit"])
     table.add_row("Jumlah file berubah:", str(info["changed_files"]))
+    table.add_row("Terakhir Push:", info["last_push"])
+    table.add_row("Terakhir Pull:", info["last_pull"])
     table.add_row("Tanggal & Jam:", now_str())
 
     console.print(Panel(table, title="[bold cyan]Dashboard[/bold cyan]", expand=False))

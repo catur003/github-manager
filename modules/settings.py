@@ -31,6 +31,26 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 }
 
 
+def record_repo_event(repo_path: str, key: str) -> None:
+    """
+    PRIORITAS 4: catat timestamp event per-repo (last_push/last_pull),
+    disimpan di config['repo_history'][repo_path][key], dipakai Dashboard.
+    """
+    from modules.utils import now_str
+
+    config = load_config()
+    history = config.setdefault("repo_history", {})
+    entry = history.setdefault(repo_path, {})
+    entry[key] = now_str()
+    save_config(config)
+
+
+def get_repo_event(repo_path: str, key: str) -> str:
+    """Ambil timestamp event terakhir untuk repo ini, atau '-' kalau belum ada."""
+    config = load_config()
+    return config.get("repo_history", {}).get(repo_path, {}).get(key, "-")
+
+
 def load_config() -> Dict[str, Any]:
     """Baca file config.json. Jika belum ada, buat dengan nilai default."""
     ensure_dirs()

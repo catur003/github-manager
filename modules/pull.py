@@ -6,9 +6,10 @@ Menu Pull: Pull, Fetch, Refresh.
 import questionary
 from rich.console import Console
 
-from modules.utils import run_git
-from modules.settings import load_config
+from modules.utils import run_git, spinner
+from modules.settings import load_config, record_repo_event
 from modules.logger import log_activity, log_error
+from modules import preflight
 
 console = Console()
 
@@ -26,28 +27,43 @@ def pull() -> None:
     repo = _get_active_repo()
     if not repo:
         return
-    console.print("[cyan]Mengambil (pull) perubahan terbaru dari remote...[/cyan]")
-    ok, out, err = run_git(["pull"], cwd=repo, timeout=120)
+    # PRIORITAS 1 #2/#1: pre-flight check + auto upstream sebelum pull,
+    # supaya user gak pernah lihat "no tracking information" mentah.
+    if not preflight.preflight(repo, need_remote=True, need_upstream=True, label="Pull"):
+        return
+    with spinner("Mengambil (pull) perubahan terbaru dari remote..."):
+        ok, out, err = run_git(["pull"], cwd=repo, timeout=120)
     if not ok:
         console.print(f"[red]Pull gagal: {_friendly(err)}[/red]")
         log_error("Pull gagal", raw_detail=err)
         return
-    console.print(f"[green]Pull berhasil.[/green]\n{out}")
+    n_commit = out.count("\n") if out else 0
+    console.print(f"[green]✓ Pull Berhasil[/green]\n\n{out or 'Sudah paling baru (tidak ada perubahan).'}")
     log_activity("Pull berhasil")
+    record_repo_event(repo, "last_pull")
+    # PRIORITAS 1 #3: refresh info repo abis pull (branch/remote sinkron lagi)
+    run_git(["status", "--short"], cwd=repo)
+    run_git(["branch", "-vv"], cwd=repo)
+    run_git(["remote", "-v"], cwd=repo)
 
 
 def fetch() -> None:
     repo = _get_active_repo()
     if not repo:
         return
-    console.print("[cyan]Mengecek (fetch) info terbaru dari remote...[/cyan]")
-    ok, out, err = run_git(["fetch"], cwd=repo, timeout=120)
+    if not preflight.preflight(repo, need_remote=True, need_upstream=False, label="Fetch"):
+        return
+    with spinner("Mengecek (fetch) info terbaru dari remote..."):
+        ok, out, err = run_git(["fetch"], cwd=repo, timeout=120)
     if not ok:
         console.print(f"[red]Fetch gagal: {_friendly(err)}[/red]")
         log_error("Fetch gagal", raw_detail=err)
         return
-    console.print("[green]Fetch berhasil. Info remote sudah diperbarui.[/green]")
+    console.print("[green]✓ Fetch Berhasil.[/green] Info remote sudah diperbarui.")
     log_activity("Fetch berhasil")
+    run_git(["status", "--short"], cwd=repo)
+    run_git(["branch", "-vv"], cwd=repo)
+    run_git(["remote", "-v"], cwd=repo)
 
 
 def refresh() -> None:
@@ -69,6 +85,8 @@ def _friendly(err: str) -> str:
         return "Terjadi conflict saat pull. Selesaikan conflict terlebih dahulu."
     if "authentication" in low or "permission denied" in low:
         return "Autentikasi gagal. Periksa username/token/SSH key kamu."
+    if "no tracking information" in low or "no upstream" in low:
+        return "Branch belum memiliki upstream. Coba lagi - seharusnya sudah otomatis dihubungkan."
     return err or "Terjadi kesalahan yang tidak diketahui."
 
 

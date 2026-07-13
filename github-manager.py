@@ -18,7 +18,7 @@ import questionary  # noqa: E402
 from rich.console import Console  # noqa: E402
 
 from modules.utils import ensure_dirs  # noqa: E402
-from modules.logger import log_activity, log_error, read_recent_activity  # noqa: E402
+from modules.logger import log_activity, log_error, read_recent_activity, read_recent_debug  # noqa: E402
 from modules import (  # noqa: E402
     dashboard,
     repository,
@@ -31,6 +31,7 @@ from modules import (  # noqa: E402
     merge,
     backup,
     settings,
+    update,
     help as help_module,
 )
 
@@ -50,6 +51,8 @@ MAIN_MENU_CHOICES = [
     "11. Belajar Git",
     "12. Pengaturan",
     "13. Log Aktivitas",
+    "14. Cek Update",
+    "15. Log Debug",
     "0. Keluar",
 ]
 
@@ -62,6 +65,18 @@ def show_activity_log() -> None:
     else:
         for line in lines:
             console.print(line)
+    questionary.text("\nTekan Enter untuk kembali...").ask()
+
+
+def show_debug_log() -> None:
+    """PRIORITAS 7: viewer untuk logs/debug.log (trace perintah git teknis)."""
+    console.rule("[bold cyan]Log Debug (teknis)")
+    lines = read_recent_debug(30)
+    if not lines:
+        console.print("[yellow]Belum ada log debug tercatat.[/yellow]")
+    else:
+        for line in lines:
+            console.print(f"[dim]{line}[/dim]")
     questionary.text("\nTekan Enter untuk kembali...").ask()
 
 
@@ -111,6 +126,10 @@ def main() -> None:
                 settings.menu()
             elif pilihan.startswith("13."):
                 show_activity_log()
+            elif pilihan.startswith("14."):
+                update.menu()
+            elif pilihan.startswith("15."):
+                show_debug_log()
         except KeyboardInterrupt:
             console.print("\n[yellow]Dibatalkan oleh pengguna.[/yellow]")
         except Exception as e:  # noqa: BLE001

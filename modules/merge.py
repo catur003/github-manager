@@ -7,9 +7,10 @@ tampilkan conflict, jika berhasil tawarkan hapus branch source).
 import questionary
 from rich.console import Console
 
-from modules.utils import run_git
+from modules.utils import run_git, spinner
 from modules.settings import load_config
 from modules.logger import log_activity, log_error
+from modules import preflight
 
 console = Console()
 
@@ -33,6 +34,10 @@ def _list_branches(repo: str) -> list[str]:
 def merge_lokal() -> None:
     repo = _get_active_repo()
     if not repo:
+        return
+    # Merge lokal gak butuh remote/internet, tapi tetap cek repo valid +
+    # working tree (warning kalau ada perubahan belum di-commit).
+    if not preflight.preflight(repo, need_remote=False, label="Merge"):
         return
     branches = _list_branches(repo)
     if len(branches) < 2:
@@ -58,7 +63,8 @@ def merge_lokal() -> None:
         console.print(f"[red]Gagal pindah ke branch target: {err}[/red]")
         return
 
-    ok, out, err = run_git(["merge", source], cwd=repo)
+    with spinner(f"Menggabungkan '{source}' ke dalam '{target}'..."):
+        ok, out, err = run_git(["merge", source], cwd=repo)
     if not ok:
         if "conflict" in (out + err).lower():
             console.print("[red]Terjadi CONFLICT saat merge. Merge dihentikan.[/red]")
@@ -75,6 +81,9 @@ def merge_lokal() -> None:
 
     console.print(f"[green]Merge berhasil.[/green]\n{out}")
     log_activity(f"Merge {source} ke {target} berhasil")
+    run_git(["status", "--short"], cwd=repo)
+    run_git(["branch", "-vv"], cwd=repo)
+    run_git(["remote", "-v"], cwd=repo)
 
     hapus = questionary.confirm(f"Merge berhasil. Hapus branch '{source}' sekarang?", default=False).ask()
     if hapus:
