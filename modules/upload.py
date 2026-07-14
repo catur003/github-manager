@@ -194,15 +194,15 @@ def _zip_target_rel(member_name: str, strip_wrapper: bool) -> Optional[str]:
     return rel or None
 
 
-def _compute_zip_diff(zip_path: str, dest_dir: str, strip_wrapper: bool) -> Tuple[int, int, int, dict]:
+def _compute_zip_diff(zip_path: str, dest_dir: str, strip_wrapper: bool) -> Tuple[int, int, int, int, dict]:
     """
     PRIORITAS 3 #13 - Preview Perubahan ZIP.
-    Hitung berapa file akan Tambah / Update / Delete kalau ZIP ini
+    Hitung berapa file akan Tambah / Update / Sama / Delete kalau ZIP ini
     diekstrak ke dest_dir, dibandingkan isi dest_dir SEKARANG.
-    Return (tambah, update, delete, target_map) - target_map dipakai lagi
-    saat proses ekstraksi supaya gak perlu hitung ulang.
+    Return (tambah, update, sama, delete, target_map) - target_map dipakai
+    lagi saat proses ekstraksi supaya gak perlu hitung ulang.
     """
-    tambah = update = 0
+    tambah = update = sama = 0
     target_map: dict = {}  # target_path -> zip member name
 
     with zipfile.ZipFile(zip_path, "r") as z:
@@ -224,6 +224,8 @@ def _compute_zip_diff(zip_path: str, dest_dir: str, strip_wrapper: bool) -> Tupl
                 zip_hash = sha1_of_bytes(f.read())
             if local_hash != zip_hash:
                 update += 1
+            else:
+                sama += 1
 
     # Delete: file yang SEKARANG ada di dest_dir tapi gak ada di ZIP sama sekali.
     delete = 0
@@ -236,18 +238,28 @@ def _compute_zip_diff(zip_path: str, dest_dir: str, strip_wrapper: bool) -> Tupl
                 if full not in target_map:
                     delete += 1
 
-    return tambah, update, delete, target_map
+    return tambah, update, sama, delete, target_map
 
 
-def _confirm_zip_changes(tambah: int, update: int, delete: int) -> bool:
-    table = Table(title="Preview Perubahan ZIP", header_style="bold cyan")
-    table.add_column("Jenis")
-    table.add_column("Jumlah")
-    table.add_row("Tambah", str(tambah))
-    table.add_row("Update", str(update))
-    table.add_row("Delete (info saja, TIDAK dihapus otomatis)", str(delete))
-    console.print(table)
-    return bool(questionary.confirm("Lanjutkan ekstrak?", default=True).ask())
+def _confirm_zip_changes(repo: str, branch: str, total_entries: int, wrapper: Optional[str],
+                          strip_wrapper: bool, tambah: int, update: int, sama: int, delete: int) -> bool:
+    console.print(f"\n[bold]Repository[/bold] : {os.path.basename(repo)}")
+    console.print(f"[bold]Branch[/bold]     : {branch}\n")
+
+    console.print("[bold cyan]ZIP[/bold cyan]")
+    console.print("──────────────")
+    console.print(f"Total File : {total_entries}")
+    if wrapper and strip_wrapper:
+        console.print(f"Folder Pembungkus : {wrapper} (akan dihapus)")
+
+    console.print("\n[bold cyan]Analisis Perubahan[/bold cyan]")
+    console.print("──────────────────")
+    console.print(f"[green]✓ Sama (tidak berubah)[/green] : {sama}")
+    console.print(f"[yellow]🟡 Update             [/yellow] : {update}")
+    console.print(f"[green]🟢 File Baru          [/green] : {tambah}")
+    console.print(f"[red]🔴 Akan Dihapus       [/red] : {delete} [dim](info saja, tidak dihapus otomatis)[/dim]")
+
+    return bool(questionary.confirm("\nLanjutkan ekstrak?", default=True).ask())
 
 
 # ---------------------------------------------------------------------------
@@ -287,10 +299,16 @@ def upload_zip_extract() -> None:
             return
         strip_wrapper = pilihan.startswith("(*)")
 
-    # PRIORITAS 3 #13: preview Tambah/Update/Delete sebelum benar-benar ekstrak
+    # PRIORITAS 3 #13: preview Sama/Tambah/Update/Delete sebelum benar-benar ekstrak
     with spinner("Menghitung perubahan..."):
-        tambah, update, delete, target_map = _compute_zip_diff(zip_path, dest_dir, strip_wrapper)
-    if not _confirm_zip_changes(tambah, update, delete):
+        tambah, update, sama, delete, target_map = _compute_zip_diff(zip_path, dest_dir, strip_wrapper)
+        with zipfile.ZipFile(zip_path, "r") as z:
+            total_entries = sum(1 for m in z.infolist() if not m.is_dir())
+
+    ok_b, branch_now, _e = run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo)
+    branch_now = branch_now if ok_b else "-"
+
+    if not _confirm_zip_changes(repo, branch_now, total_entries, wrapper, strip_wrapper, tambah, update, sama, delete):
         console.print("[yellow]Dibatalkan.[/yellow]")
         return
 
@@ -306,20 +324,28 @@ def upload_zip_extract() -> None:
     files_before = count_files_in_dir(repo)
 
     try:
-        with spinner("Mengekstrak..."):
+        from rich.progress import Progress, BarColumn, TextColumn, TaskProgressColumn
+        with Progress(
+            TextColumn("[cyan]Mengekstrak...[/cyan]"), BarColumn(), TaskProgressColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("extract", total=total_entries)
             with zipfile.ZipFile(zip_path, "r") as z:
                 for member in z.infolist():
                     if member.is_dir():
                         continue
                     rel = _zip_target_rel(member.filename, strip_wrapper)
                     if not rel:
+                        progress.advance(task)
                         continue
                     target_path = os.path.join(dest_dir, rel)
                     if os.path.exists(target_path) and not timpa:
+                        progress.advance(task)
                         continue
                     os.makedirs(os.path.dirname(target_path), exist_ok=True)
                     with z.open(member) as src, open(target_path, "wb") as dst:
                         shutil.copyfileobj(src, dst)
+                    progress.advance(task)
     except zipfile.BadZipFile as e:
         console.print("[red]Gagal mengekstrak: file ZIP rusak.[/red]")
         log_error("Gagal ekstrak ZIP", e, raw_detail=zip_path)

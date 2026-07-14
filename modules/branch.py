@@ -166,6 +166,136 @@ def refresh() -> None:
     lihat_branch()
 
 
+def _list_remote_branches(repo: str, remote: str = "origin") -> list[str]:
+    """Ambil daftar nama branch di remote (tanpa prefix 'origin/')."""
+    ok, out, _err = run_git(["branch", "-r"], cwd=repo)
+    if not ok or not out:
+        return []
+    branches = []
+    prefix = f"{remote}/"
+    for line in out.splitlines():
+        name = line.strip()
+        if not name or "->" in name:
+            continue
+        if name.startswith(prefix):
+            name = name[len(prefix):]
+        branches.append(name)
+    return branches
+
+
+def sync_branch() -> None:
+    """Branch Synchronization: bandingkan branch lokal vs remote, tampilkan
+    ahead/behind, branch yang hanya ada di satu sisi, lalu tawarkan aksi
+    Fetch / Pull / Push / Hapus branch lokal / Hapus branch remote."""
+    repo = _get_active_repo()
+    if not repo:
+        return
+
+    with spinner("Fetch dari GitHub (sinkronisasi daftar branch)..."):
+        run_git(["fetch", "--prune", "origin"], cwd=repo, timeout=60)
+
+    local = _list_branches(repo)
+    remote = _list_remote_branches(repo)
+    ok, cur_out, _err = run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo)
+    current = cur_out.strip() if ok else None
+
+    both = [b for b in local if b in remote]
+    only_local = [b for b in local if b not in remote]
+    only_remote = [b for b in remote if b not in local]
+
+    table = Table(title="Branch Synchronization", header_style="bold cyan")
+    table.add_column("Branch")
+    table.add_column("Status")
+    table.add_column("Ahead/Behind")
+
+    for b in both:
+        ok_c, counts, _e = run_git(["rev-list", "--left-right", "--count", f"{b}...origin/{b}"], cwd=repo)
+        ahead_behind = "-"
+        if ok_c and counts:
+            parts = counts.split()
+            if len(parts) == 2:
+                ahead_behind = f"↑{parts[0]} ↓{parts[1]}"
+        label = f"{b} (aktif)" if b == current else b
+        table.add_row(label, "Lokal + Remote", ahead_behind)
+    for b in only_local:
+        label = f"{b} (aktif)" if b == current else b
+        table.add_row(label, "[yellow]Hanya Lokal[/yellow]", "-")
+    for b in only_remote:
+        table.add_row(b, "[cyan]Hanya di GitHub[/cyan]", "-")
+
+    console.print(table)
+
+    aksi = questionary.select(
+        "Pilih aksi:",
+        choices=["Fetch", "Pull", "Push", "Hapus Branch Lokal", "Hapus Branch Remote", "Kembali"],
+    ).ask()
+    if not aksi or aksi == "Kembali":
+        return
+
+    if aksi == "Fetch":
+        with spinner("Fetch dari GitHub..."):
+            ok2, _out, err = run_git(["fetch", "--prune", "origin"], cwd=repo, timeout=60)
+        if ok2:
+            console.print("[green]Fetch selesai.[/green]")
+        else:
+            console.print(f"[red]Fetch gagal: {err}[/red]")
+
+    elif aksi == "Pull":
+        from modules import pull as pull_module
+        pull_module.pull()
+
+    elif aksi == "Push":
+        from modules import push as push_module
+        push_module.push()
+
+    elif aksi == "Hapus Branch Lokal":
+        if not local:
+            console.print("[yellow]Tidak ada branch lokal.[/yellow]")
+            return
+        target = questionary.select("Pilih branch lokal untuk dihapus:", choices=local + ["Batal"]).ask()
+        if not target or target == "Batal":
+            return
+        if target == current:
+            console.print("[red]Tidak bisa menghapus branch yang sedang aktif. Checkout ke branch lain dulu.[/red]")
+            return
+        yakin = questionary.confirm(f"Yakin hapus branch lokal '{target}'?", default=False).ask()
+        if not yakin:
+            return
+        ok2, _out, err = run_git(["branch", "-d", target], cwd=repo)
+        if not ok2:
+            paksa = questionary.confirm(
+                f"Branch belum sepenuhnya di-merge. {_friendly(err)} Hapus paksa?", default=False
+            ).ask()
+            if paksa:
+                ok2, _out, err = run_git(["branch", "-D", target], cwd=repo)
+        if ok2:
+            console.print(f"[green]Branch lokal '{target}' berhasil dihapus.[/green]")
+            log_activity(f"Sync Branch: branch lokal {target} dihapus")
+        else:
+            console.print(f"[red]Gagal menghapus branch lokal: {_friendly(err)}[/red]")
+
+    elif aksi == "Hapus Branch Remote":
+        if not remote:
+            console.print("[yellow]Tidak ada branch di remote.[/yellow]")
+            return
+        target = questionary.select("Pilih branch remote untuk dihapus:", choices=remote + ["Batal"]).ask()
+        if not target or target == "Batal":
+            return
+        yakin = questionary.confirm(
+            f"Yakin hapus branch '{target}' dari GitHub? Ini memengaruhi semua orang yang pakai repo ini.",
+            default=False,
+        ).ask()
+        if not yakin:
+            return
+        with spinner(f"Menghapus branch remote '{target}'..."):
+            ok2, _out, err = run_git(["push", "origin", "--delete", target], cwd=repo, timeout=60)
+        if ok2:
+            console.print(f"[green]Branch remote '{target}' berhasil dihapus.[/green]")
+            log_activity(f"Sync Branch: branch remote {target} dihapus")
+        else:
+            console.print(f"[red]Gagal menghapus branch remote: {_friendly(err)}[/red]")
+
+
 def _friendly(err: str) -> str:
     """Ubah pesan error git mentah jadi pesan yang mudah dipahami user."""
     low = err.lower()
@@ -188,6 +318,9 @@ def show_help() -> None:
         "- Rename Branch: mengganti nama sebuah branch.\n"
         "- Delete Branch: menghapus branch (butuh konfirmasi).\n"
         "- Refresh: memuat ulang daftar branch.\n"
+        "- Sync Branch: bandingkan branch lokal vs GitHub (ahead/behind,\n"
+        "  branch yang cuma ada di satu sisi), lalu Fetch/Pull/Push atau\n"
+        "  hapus branch lokal/remote dari sana.\n"
     )
     questionary.text("Tekan Enter untuk kembali...").ask()
 
@@ -204,6 +337,7 @@ def menu() -> None:
                 "Buat Branch Baru",
                 "Rename Branch",
                 "Delete Branch",
+                "Sync Branch",
                 "Refresh",
                 "? Help",
                 "Kembali",
@@ -218,6 +352,7 @@ def menu() -> None:
                 "Buat Branch Baru": buat_branch_baru,
                 "Rename Branch": rename_branch,
                 "Delete Branch": delete_branch,
+                "Sync Branch": sync_branch,
                 "Refresh": refresh,
                 "? Help": show_help,
             }[choice]()

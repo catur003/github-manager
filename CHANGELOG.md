@@ -1,5 +1,31 @@
 # Changelog GitHub Manager
 
+## v1.2.0
+
+### Fixed
+- **Bug Pull Request**: sebelumnya gagal membuat PR jika branch lokal
+  sudah dihapus walau branch masih ada di GitHub, karena daftar branch
+  cuma diambil dari `git branch --list` (lokal saja). Sekarang daftar
+  source/target digabung dari lokal + remote, ada penanda "(hanya di
+  GitHub)", dan ditambahkan opsi Fetch Branch di awal alur buat PR.
+
+### Added
+- **Clone Repository Wizard** (`Repository > Clone Repository`): validasi
+  format URL/`owner-repo`, cek folder tujuan sudah ada, dan opsi
+  Timpa/Pilih folder lain/Batal sebelum clone.
+- **Compare Repository** (`Repository > Compare Repository`): bandingkan
+  repository lokal vs GitHub - branch aktif, commit terbaru, jumlah file
+  baru/berubah/hilang. Kalau beda, tawarkan Pull, Clone Ulang (dengan
+  konfirmasi ketik ulang path supaya gak salah hapus folder), atau Batal.
+- **Branch Synchronization** (`Branch > Sync Branch`): tabel branch lokal
+  vs remote, ahead/behind per branch, branch yang cuma ada di lokal atau
+  cuma di GitHub, plus aksi Fetch/Pull/Push/Hapus Branch Lokal/Hapus
+  Branch Remote.
+- **Preview ZIP diperkaya**: sekarang menampilkan Repository, Branch,
+  Total File di ZIP, info folder pembungkus, dan analisis perubahan
+  lengkap (Sama/Update/File Baru/Akan Dihapus), plus progress bar saat
+  proses ekstraksi (bukan spinner statis).
+
 ## v1.1.1 (Bugfix pass setelah review)
 
 ### Fixed (bug kritis dari v1.1)

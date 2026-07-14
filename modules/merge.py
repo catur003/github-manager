@@ -67,6 +67,35 @@ def _list_branches(repo: str) -> list[str]:
     return [line.replace("*", "").strip() for line in out.splitlines() if line.strip()]
 
 
+def _list_remote_branches(repo: str, remote: str = "origin") -> list[str]:
+    """Daftar branch yang ada di remote (mis. GitHub), tanpa prefix 'origin/'."""
+    ok, out, _err = run_git(["branch", "-r"], cwd=repo)
+    if not ok or not out:
+        return []
+    branches = []
+    prefix = f"{remote}/"
+    for line in out.splitlines():
+        name = line.strip()
+        if not name or "->" in name:
+            continue
+        if name.startswith(prefix):
+            name = name[len(prefix):]
+        branches.append(name)
+    return branches
+
+
+def _list_branches_for_pr(repo: str) -> tuple[list[str], set[str]]:
+    """FIX BUG: sebelumnya cuma pakai branch lokal, jadi PR gagal dibuat kalau
+    branch lokal sudah dihapus padahal branch itu masih ada di GitHub.
+    Sekarang gabungkan branch lokal + remote (dedup), dan kembalikan juga
+    set nama branch yang cuma ada di remote (untuk penanda di pilihan)."""
+    local = _list_branches(repo)
+    remote = _list_remote_branches(repo)
+    remote_only = set(remote) - set(local)
+    combined = local + [b for b in remote if b not in local]
+    return combined, remote_only
+
+
 def merge_lokal() -> None:
     repo = _get_active_repo()
     if not repo:
@@ -142,23 +171,43 @@ def buat_pull_request() -> None:
     if not _gh_ready():
         return
 
-    branches = _list_branches(repo)
+    # Tawarkan Fetch dulu supaya daftar branch (termasuk yang baru dibuat/
+    # dihapus orang lain di GitHub) sinkron sebelum dipilih.
+    sinkron = questionary.confirm(
+        "Fetch Branch dari GitHub dulu? (disarankan supaya daftar branch sinkron)",
+        default=True,
+    ).ask()
+    if sinkron:
+        with spinner("Fetch branch dari GitHub..."):
+            run_git(["fetch", "--prune", "origin"], cwd=repo, timeout=60)
+
+    branches, remote_only = _list_branches_for_pr(repo)
     if len(branches) < 2:
         console.print("[yellow]Minimal harus ada 2 branch untuk membuat Pull Request.[/yellow]")
         return
 
     current = preflight.get_current_branch(repo) or branches[0]
-    source_choices = [f"{b} (branch aktif)" if b == current else b for b in branches] + ["Batal"]
-    source_pick = questionary.select("Pilih Source Branch (Compare):", choices=source_choices, default=source_choices[branches.index(current)]).ask()
+
+    def _label(b: str) -> str:
+        if b == current:
+            return f"{b} (branch aktif)"
+        if b in remote_only:
+            return f"{b} (hanya di GitHub)"
+        return b
+
+    source_choices = [_label(b) for b in branches] + ["Batal"]
+    default_idx = branches.index(current) if current in branches else 0
+    source_pick = questionary.select("Pilih Source Branch (Compare):", choices=source_choices, default=source_choices[default_idx]).ask()
     if not source_pick or source_pick == "Batal":
         return
-    source = source_pick.replace(" (branch aktif)", "")
+    source = source_pick.replace(" (branch aktif)", "").replace(" (hanya di GitHub)", "")
 
-    target_choices = [b for b in branches if b != source] + ["Batal"]
+    target_choices = [_label(b) for b in branches if b != source] + ["Batal"]
     default_target = _detect_base_branch(repo, [b for b in branches if b != source])
-    target = questionary.select("Pilih Target/Base Branch:", choices=target_choices, default=default_target).ask()
-    if not target or target == "Batal":
+    target_pick = questionary.select("Pilih Target/Base Branch:", choices=target_choices, default=_label(default_target)).ask()
+    if not target_pick or target_pick == "Batal":
         return
+    target = target_pick.replace(" (branch aktif)", "").replace(" (hanya di GitHub)", "")
 
     # Pastikan source branch sudah ada di remote, gh pr create butuh itu.
     if source == current:
