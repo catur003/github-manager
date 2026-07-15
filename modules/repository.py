@@ -224,6 +224,20 @@ def _print_working_tree(is_clean: bool, modified: int, deleted: int, untracked: 
         console.print(f"Untracked : {untracked}")
 
 
+def _trees_identical(repo: str, ref_a: str, ref_b: str) -> Optional[bool]:
+    """Bandingkan isi (tree) dua ref secara langsung, terlepas dari commit
+    hash-nya beda atau tidak. Dipakai untuk menjelaskan kasus 'Behind > 0
+    tapi diff file kosong' - commit-nya memang beda/baru di histori, tapi
+    isi filenya sama persis (paling sering ini commit merge yang cuma
+    mencatat riwayat, mis. commit 'Merge pull request' dari GitHub, tanpa
+    ada perubahan konten file apa pun). Return None kalau gagal dihitung."""
+    ok_a, tree_a, _e1 = run_git(["rev-parse", f"{ref_a}^{{tree}}"], cwd=repo)
+    ok_b, tree_b, _e2 = run_git(["rev-parse", f"{ref_b}^{{tree}}"], cwd=repo)
+    if not ok_a or not ok_b:
+        return None
+    return tree_a.strip() == tree_b.strip()
+
+
 def _diff_counts(repo: str, range_expr: str) -> Tuple[int, int, int]:
     """Hitung (baru, berubah, hilang) dari 'git diff --name-status <range_expr>'."""
     ok, out, _e = run_git(["diff", "--name-status", range_expr], cwd=repo)
@@ -266,8 +280,8 @@ def compare_repository() -> None:
         return
 
     branch = preflight.get_current_branch(repo) or "-"
-    with spinner("Mengambil data terbaru dari GitHub (fetch)..."):
-        run_git(["fetch", "origin"], cwd=repo, timeout=60)
+    with spinner("Mengambil data terbaru dari GitHub (fetch --prune)..."):
+        run_git(["fetch", "--prune", "origin"], cwd=repo, timeout=60)
 
     upstream = f"origin/{branch}"
     ok_local, local_commit, _e1 = run_git(["rev-parse", "--short", "HEAD"], cwd=repo)
@@ -334,6 +348,26 @@ def compare_repository() -> None:
         console.print(f"🟡 File Berubah   : {berubah}")
         console.print(f"🔴 File Hilang    : {hilang}")
 
+        if baru + berubah + hilang == 0:
+            # Behind > 0 tapi diff file kosong - ini KELIHATAN kontradiktif,
+            # jadi jangan diam saja. Cek langsung isi (tree) HEAD vs upstream:
+            # kalau memang identik, commit "baru" itu cuma catatan riwayat
+            # (mis. commit merge dari GitHub) tanpa perubahan konten apa pun.
+            identik = _trees_identical(repo, "HEAD", upstream)
+            if identik:
+                console.print(
+                    "\n[cyan]ℹ Ada commit baru di GitHub, tapi isi filenya identik "
+                    "dengan lokal. Kemungkinan itu commit merge yang cuma mencatat "
+                    "riwayat (mis. \"Merge pull request\"), tanpa perubahan konten "
+                    "file apa pun.[/cyan]"
+                )
+            else:
+                console.print(
+                    "\n[yellow]⚠ Behind > 0 tapi 'git diff --name-status' tidak "
+                    "mendeteksi perubahan file. Jalankan Pull untuk memastikan "
+                    "repository benar-benar tersinkron.[/yellow]"
+                )
+
         _print_working_tree(is_clean, modified, deleted, untracked)
         console.print("\n[bold]Tindakan Disarankan[/bold]\n\n✓ Pull Repository")
 
@@ -364,8 +398,8 @@ def compare_repository() -> None:
         choices=["Fetch ulang", "Lihat Log Commit (Review)", "Batal"],
     ).ask()
     if aksi == "Fetch ulang":
-        with spinner("Fetch ulang dari origin..."):
-            run_git(["fetch", "origin"], cwd=repo, timeout=60)
+        with spinner("Fetch ulang dari origin (--prune)..."):
+            run_git(["fetch", "--prune", "origin"], cwd=repo, timeout=60)
         console.print("[green]Fetch selesai.[/green]")
     elif aksi == "Lihat Log Commit (Review)":
         ok_log, log_out, _e = run_git(
