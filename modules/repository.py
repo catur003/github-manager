@@ -5,6 +5,7 @@ ganti, dan lihat repository aktif.
 """
 
 import os
+from typing import Optional, Tuple
 
 import questionary
 from rich.console import Console
@@ -170,10 +171,91 @@ def ganti_repository() -> None:
     tambah_repository()
 
 
+def _rev_list_ahead_behind(repo: str, upstream: str) -> Optional[Tuple[int, int]]:
+    """Hitung (ahead, behind) HEAD relatif ke upstream lewat
+    'git rev-list --left-right --count HEAD...<upstream>'.
+    ahead = commit lokal yang belum ada di upstream.
+    behind = commit upstream yang belum ada di lokal.
+    Return None kalau perintahnya gagal (mis. upstream tidak valid)."""
+    ok, out, _err = run_git(["rev-list", "--left-right", "--count", f"HEAD...{upstream}"], cwd=repo)
+    if not ok or not out.strip():
+        return None
+    parts = out.strip().split()
+    if len(parts) != 2:
+        return None
+    try:
+        return int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+
+
+def _working_tree_status(repo: str) -> Tuple[bool, int, int, int]:
+    """Baca 'git status --porcelain' dan kembalikan (is_clean, modified, deleted, untracked).
+    Ini SENGAJA dipisah dari status ahead/behind commit, supaya user bisa
+    bedain 'perubahan Git (commit)' vs 'perubahan file lokal yang belum di-commit'."""
+    ok, out, _err = run_git(["status", "--porcelain"], cwd=repo)
+    if not ok:
+        return True, 0, 0, 0
+    modified = deleted = untracked = 0
+    for line in out.splitlines():
+        if not line:
+            continue
+        code = line[:2]
+        if code == "??":
+            untracked += 1
+        elif "D" in code:
+            deleted += 1
+        else:
+            modified += 1
+    is_clean = (modified + deleted + untracked) == 0
+    return is_clean, modified, deleted, untracked
+
+
+def _print_working_tree(is_clean: bool, modified: int, deleted: int, untracked: int) -> None:
+    console.print("\n[bold]Working Tree[/bold]\n")
+    if is_clean:
+        console.print("✓ Clean")
+        return
+    if modified:
+        console.print(f"Modified  : {modified}")
+    if deleted:
+        console.print(f"Deleted   : {deleted}")
+    if untracked:
+        console.print(f"Untracked : {untracked}")
+
+
+def _diff_counts(repo: str, range_expr: str) -> Tuple[int, int, int]:
+    """Hitung (baru, berubah, hilang) dari 'git diff --name-status <range_expr>'."""
+    ok, out, _e = run_git(["diff", "--name-status", range_expr], cwd=repo)
+    baru = berubah = hilang = 0
+    if ok and out:
+        for line in out.splitlines():
+            code = line.split("\t")[0].strip()
+            if code.startswith("A"):
+                baru += 1
+            elif code.startswith("M"):
+                berubah += 1
+            elif code.startswith("D"):
+                hilang += 1
+    return baru, berubah, hilang
+
+
 def compare_repository() -> None:
     """Repository Compare: bandingkan repository lokal dengan GitHub.
-    Tampilkan branch aktif, commit terbaru, file baru/berubah/hilang.
-    Jika berbeda, tawarkan Pull / Clone ulang / Batal."""
+
+    Alur baru (menggantikan versi lama yang selalu langsung 'git diff
+    HEAD..origin' tanpa cek arah, sehingga repo yang cuma 'ahead' pun bisa
+    salah ditampilkan seolah ada banyak file berubah):
+
+    1. Tentukan status lebih dulu lewat ahead/behind commit count
+       (git rev-list --left-right --count) -> Sinkron / Lokal Lebih Baru /
+       GitHub Lebih Baru / Diverged.
+    2. Diff file HANYA dihitung kalau memang relevan untuk status itu
+       (cuma saat GitHub Lebih Baru - karena itu satu-satunya kasus di mana
+       "file apa yang bakal berubah" jelas & searah).
+    3. Working Tree (perubahan file lokal yang belum di-commit) ditampilkan
+       terpisah dari status commit, supaya tidak tercampur maknanya.
+    """
     from modules.utils import GitError  # noqa: F401 (dipakai di except di menu())
     from modules import preflight
 
@@ -191,51 +273,108 @@ def compare_repository() -> None:
     ok_local, local_commit, _e1 = run_git(["rev-parse", "--short", "HEAD"], cwd=repo)
     ok_remote, remote_commit, _e2 = run_git(["rev-parse", "--short", upstream], cwd=repo)
 
-    console.print(f"\n[cyan]Repository[/cyan] : {os.path.basename(repo)}")
-    console.print(f"[cyan]Branch[/cyan]     : {branch}")
+    console.print("\n[bold cyan]════════ Compare Repository ════════[/bold cyan]\n")
+    console.print(f"Repository : {os.path.basename(repo)}")
+    console.print(f"Branch     : {branch}")
 
     if not ok_remote:
-        console.print(f"[yellow]Branch '{branch}' tidak ditemukan di GitHub (origin/{branch}).[/yellow]")
+        console.print(f"\n[yellow]Branch '{branch}' tidak ditemukan di GitHub (origin/{branch}).[/yellow]")
         return
 
-    console.print(f"[cyan]Commit Lokal[/cyan]  : {local_commit if ok_local else '-'}")
-    console.print(f"[cyan]Commit GitHub[/cyan] : {remote_commit}\n")
+    console.print(f"\nCommit Lokal  : {local_commit if ok_local else '-'}")
+    console.print(f"Commit GitHub : {remote_commit}")
+    console.print("\n" + "─" * 28)
 
-    if ok_local and local_commit == remote_commit:
-        console.print("[green]✓ Repository sama persis dengan GitHub. Tidak ada perbedaan.[/green]")
+    is_clean, modified, deleted, untracked = _working_tree_status(repo)
+    ahead_behind = _rev_list_ahead_behind(repo, upstream)
+
+    if ahead_behind is None:
+        # Fallback kalau rev-list gagal - tetap kasih info, jangan diam saja.
+        console.print("\n[yellow]Tidak bisa menentukan status ahead/behind dari Git.[/yellow]")
+        _print_working_tree(is_clean, modified, deleted, untracked)
         return
 
-    ok_diff, diff_out, _e3 = run_git(["diff", "--name-status", f"HEAD..{upstream}"], cwd=repo)
-    baru = berubah = hilang = 0
-    if ok_diff and diff_out:
-        for line in diff_out.splitlines():
-            code = line.split("\t")[0].strip()
-            if code.startswith("A"):
-                baru += 1
-            elif code.startswith("M"):
-                berubah += 1
-            elif code.startswith("D"):
-                hilang += 1
+    ahead, behind = ahead_behind
+    console.print("\n[bold]Status[/bold]\n")
 
-    from rich.table import Table
-    table = Table(title="⚠ Repository Berbeda", header_style="bold yellow")
-    table.add_column("Jenis")
-    table.add_column("Jumlah")
-    table.add_row("File baru", str(baru))
-    table.add_row("File berubah", str(berubah))
-    table.add_row("File hilang", str(hilang))
-    console.print(table)
+    # --- Sinkron ---
+    if ahead == 0 and behind == 0:
+        console.print("✅ [bold green]Repository Sinkron[/bold green]")
+        _print_working_tree(is_clean, modified, deleted, untracked)
+        console.print("\nTidak ada tindakan yang diperlukan.")
+        return
+
+    # --- Lokal Lebih Baru (ahead saja) ---
+    if ahead > 0 and behind == 0:
+        console.print("🟢 [bold green]Lokal Lebih Baru[/bold green]\n")
+        console.print(f"Ahead  : {ahead} commit")
+        console.print(f"Behind : {behind} commit")
+        _print_working_tree(is_clean, modified, deleted, untracked)
+        console.print("\nRepository lokal memiliki commit\nyang belum ada di GitHub.")
+        console.print("\n[bold]Tindakan Disarankan[/bold]\n\n✓ Push Repository")
+        # Sengaja TIDAK menghitung/menampilkan File Baru/Berubah/Hilang di sini -
+        # commit yang beda arahnya cuma dari lokal, belum tentu relevan
+        # dibandingkan terhadap remote.
+
+        aksi = questionary.select("Pilih aksi:", choices=["Push Repository", "Batal"]).ask()
+        if aksi == "Push Repository":
+            from modules import push as push_module
+            push_module.push()
+        return
+
+    # --- GitHub Lebih Baru (behind saja) ---
+    if ahead == 0 and behind > 0:
+        console.print("🔵 [bold blue]GitHub Lebih Baru[/bold blue]\n")
+        console.print(f"Ahead  : {ahead}")
+        console.print(f"Behind : {behind}")
+
+        baru, berubah, hilang = _diff_counts(repo, f"HEAD..{upstream}")
+        console.print("\n[bold]Perubahan dari GitHub[/bold]\n")
+        console.print(f"🟢 File Baru      : {baru}")
+        console.print(f"🟡 File Berubah   : {berubah}")
+        console.print(f"🔴 File Hilang    : {hilang}")
+
+        _print_working_tree(is_clean, modified, deleted, untracked)
+        console.print("\n[bold]Tindakan Disarankan[/bold]\n\n✓ Pull Repository")
+
+        aksi = questionary.select(
+            "Pilih aksi:", choices=["Pull Repository", "Clone ulang repository", "Batal"]
+        ).ask()
+        if aksi == "Pull Repository":
+            from modules import pull as pull_module
+            pull_module.pull()
+        elif aksi == "Clone ulang repository":
+            _reclone_repository(repo)
+        return
+
+    # --- Diverged (ahead & behind sama-sama > 0) ---
+    console.print("🟠 [bold dark_orange]Repository Diverged[/bold dark_orange]\n")
+    console.print(f"Ahead  : {ahead}")
+    console.print(f"Behind : {behind}")
+    console.print("\nRepository lokal dan GitHub\nsama-sama memiliki commit baru.")
+    console.print("\n[yellow]Push atau Pull langsung dapat\nmenyebabkan konflik.[/yellow]")
+    # Sengaja tidak memaksa hitung diff satu arah - kedua sisi sama-sama
+    # punya perubahan, jadi "File Baru/Berubah/Hilang" versi satu arah
+    # cuma akan menyesatkan.
+    _print_working_tree(is_clean, modified, deleted, untracked)
+    console.print("\n[bold]Tindakan Disarankan[/bold]\n\n✓ Fetch\n✓ Review Commit\n✓ Merge / Rebase")
 
     aksi = questionary.select(
-        "Pilih aksi:", choices=["Pull perubahan", "Clone ulang repository", "Batal"]
+        "Pilih aksi:",
+        choices=["Fetch ulang", "Lihat Log Commit (Review)", "Batal"],
     ).ask()
-    if not aksi or aksi == "Batal":
-        return
-    if aksi == "Pull perubahan":
-        from modules import pull as pull_module
-        pull_module.pull()
-    elif aksi == "Clone ulang repository":
-        _reclone_repository(repo)
+    if aksi == "Fetch ulang":
+        with spinner("Fetch ulang dari origin..."):
+            run_git(["fetch", "origin"], cwd=repo, timeout=60)
+        console.print("[green]Fetch selesai.[/green]")
+    elif aksi == "Lihat Log Commit (Review)":
+        ok_log, log_out, _e = run_git(
+            ["log", "--oneline", "--graph", "--left-right", f"HEAD...{upstream}"], cwd=repo
+        )
+        if ok_log and log_out:
+            console.print(f"\n{log_out}")
+        else:
+            console.print("[yellow]Tidak ada log yang bisa ditampilkan.[/yellow]")
 
 
 def _reclone_repository(repo: str) -> None:
@@ -314,8 +453,8 @@ def show_help() -> None:
         "- Cari Repository Otomatis: mencari folder Git mulai dari path tertentu.\n"
         "- Clone Repository: mengunduh repository baru dari URL remote.\n"
         "- Compare Repository: membandingkan repository lokal dengan GitHub\n"
-        "  (branch, commit, file baru/berubah/hilang), lalu tawarkan Pull\n"
-        "  atau Clone Ulang.\n"
+        "  (Sinkron / Lokal Lebih Baru / GitHub Lebih Baru / Diverged),\n"
+        "  lalu tawarkan aksi yang relevan (Push, Pull, atau Fetch+Review).\n"
         "- Tambah Repository: menambahkan repository dengan path manual.\n"
         "- Ganti Repository: mengganti repository aktif.\n"
         "- Lihat Repository Aktif: menampilkan repository yang sedang dipakai.\n"
