@@ -17,6 +17,7 @@ from typing import Optional, Tuple
 import questionary
 from rich.console import Console
 from rich.table import Table
+from rich.tree import Tree
 
 from modules.utils import (
     run_git, count_files_in_dir, human_size, pick_folder_in_repo,
@@ -172,46 +173,245 @@ def preview_zip(zip_path: str) -> None:
         raise
 
 
-def _has_single_wrapper_folder(zip_path: str) -> Optional[str]:
-    """Kembalikan nama folder pembungkus jika semua isi ZIP ada dalam satu folder."""
+def _detect_zip_root(zip_path: str) -> str:
+    """
+    Mendeteksi root folder dalam ZIP dengan menelusuri "rantai wrapper"
+    secara struktural: mulai dari root ZIP, turun satu level SELAMA level
+    itu cuma berisi satu folder tunggal (tanpa file lain sejajar). Begitu
+    ketemu level yang punya file, atau lebih dari satu folder, berhenti -
+    level itu dianggap isi project yang sebenarnya.
+
+    Kenapa diubah dari pendekatan lama (cari file marker di mana pun posisinya
+    di dalam ZIP): pendekatan lama bisa salah nebak kalau ada file senama
+    marker (mis. README.md) yang kebetulan nyempil di dalam subfolder
+    (co: "app/README.md") dan urutan iterasi ZIP menemukannya duluan
+    dibanding marker yang benar-benar di root - akibatnya ZIP tanpa
+    wrapper (0 wrapper) bisa salah dianggap folder itu wrapper, lalu
+    folder app/ (dan folder lain yang sejajar) ikut kepotong dari hasil
+    ekstrak. Pendekatan baru ini murni berdasar struktur, jadi tidak akan
+    nyasar ke file yang kebetulan senama di kedalaman lain.
+
+    Return:
+    - ""            -> 0 wrapper.
+    - "a/b/.../"    -> wrapper (1 level atau berantai/nested) yang harus dihapus.
+    - "AMBIGU:<prefix>" -> level <prefix> berisi >1 folder tanpa file penyeimbang,
+      tidak bisa dipastikan otomatis mana root project-nya (kecuali marker
+      cuma cocok di salah satu folder itu, maka langsung dipilih otomatis).
+    """
+    markers = ['package.json', 'requirements.txt', 'README.md', 'github-manager.py', 'main.py']
+
     with zipfile.ZipFile(zip_path, "r") as z:
-        top_levels = set()
-        for name in z.namelist():
-            top = name.split("/")[0]
-            top_levels.add(top)
-        if len(top_levels) == 1:
-            return top_levels.pop()
+        namelist = z.namelist()
+
+    def _entries_at(prefix: str):
+        """Item (folder & file) yang persis satu level di bawah prefix."""
+        dirs = set()
+        files = []
+        plen = len(prefix)
+        for name in namelist:
+            if prefix and not name.startswith(prefix):
+                continue
+            rel = name[plen:]
+            if not rel:
+                continue
+            parts = rel.split('/')
+            if len(parts) > 1:
+                if parts[0]:
+                    dirs.add(parts[0])
+            elif not rel.endswith('/') and parts[0]:
+                files.append(parts[0])
+        return dirs, files
+
+    prefix = ""
+    while True:
+        dirs, files = _entries_at(prefix)
+
+        if not dirs and not files:
+            # Level kosong (folder eksplisit tanpa isi) - anggap ini root-nya.
+            return prefix
+
+        if files or len(dirs) > 1:
+            if len(dirs) > 1 and not files:
+                # >1 folder sejajar, tidak ada file penyeimbang di level ini.
+                # Coba disambiguasi pakai marker yang PERSIS ada langsung di
+                # dalam salah satu folder kandidat (bukan marker yang
+                # nyasar di kedalaman lain).
+                candidates = []
+                for d in sorted(dirs):
+                    _sub_dirs, sub_files = _entries_at(prefix + d + "/")
+                    if any(f in markers for f in sub_files):
+                        candidates.append(d)
+                if len(candidates) == 1:
+                    return prefix + candidates[0] + "/"
+                return f"AMBIGU:{prefix}"
+            return prefix
+
+        # Cuma ada 1 folder tunggal & tidak ada file di level ini -> ini wrapper,
+        # turun satu level lagi (mendukung wrapper berantai/nested).
+        only_dir = next(iter(dirs))
+        prefix = prefix + only_dir + "/"
+
+
+# ---------------------------------------------------------------------------
+# ZIP Analyzer & Upload Preview - tree view (rich.Tree, sudah bagian dari
+# package rich yang sudah jadi dependency project ini, bukan dependency baru)
+# ---------------------------------------------------------------------------
+
+def _build_zip_tree(zip_path: str) -> dict:
+    """Bangun struktur nested dict dari isi ZIP: {"dirs": {nama: subtree}, "files": [(nama, size), ...]}."""
+    root: dict = {"dirs": {}, "files": []}
+    with zipfile.ZipFile(zip_path, "r") as z:
+        for info in z.infolist():
+            if info.is_dir():
+                continue
+            parts = [p for p in info.filename.split("/") if p]
+            if not parts:
+                continue
+            node = root
+            for part in parts[:-1]:
+                node = node["dirs"].setdefault(part, {"dirs": {}, "files": []})
+            node["files"].append((parts[-1], info.file_size))
+    return root
+
+
+def _count_zip_items(zip_path: str) -> Tuple[int, int]:
+    """Hitung total (jumlah_file, jumlah_folder) di seluruh ZIP. Folder dihitung
+    dari semua prefix path unik (bukan cuma entry direktori eksplisit, karena
+    banyak ZIP tidak menyertakan entry direktori eksplisit sama sekali)."""
+    with zipfile.ZipFile(zip_path, "r") as z:
+        namelist = z.namelist()
+
+    files = 0
+    dirs = set()
+    for name in namelist:
+        if name.endswith("/"):
+            trimmed = name.rstrip("/")
+            if trimmed:
+                dirs.add(trimmed)
+            continue
+        files += 1
+        parts = name.split("/")[:-1]
+        acc = []
+        for p in parts:
+            if not p:
+                continue
+            acc.append(p)
+            dirs.add("/".join(acc))
+    return files, len(dirs)
+
+
+def _tree_node_at(content_tree: dict, chain: list) -> dict:
+    """Navigasi ke subtree sesuai daftar nama folder berantai (chain)."""
+    node = content_tree
+    for name in chain:
+        node = node["dirs"].get(name, {"dirs": {}, "files": []})
+    return node
+
+
+def _attach_children(node, subtree: dict, limit: int = 20) -> None:
+    """Tempel isi langsung (satu level, tidak rekursif) dari subtree ke node Tree."""
+    dir_names = sorted(subtree["dirs"].keys())
+    file_names = sorted(name for name, _size in subtree["files"])
+    all_items = [(d, True) for d in dir_names] + [(f, False) for f in file_names]
+
+    shown = all_items[:limit] if limit else all_items
+    for name, is_dir in shown:
+        node.add(f"📁 {name}" if is_dir else f"📄 {name}")
+
+    remaining = len(all_items) - len(shown)
+    if remaining > 0:
+        node.add(f"[dim]... dan {remaining} item lainnya[/dim]")
+
+
+def _render_zip_structure_tree(zip_path: str, wrapper_chain: list,
+                                ambiguous_children: Optional[list] = None) -> None:
+    """
+    Render tree 'ZIP Analyzer'.
+    - Kalau ambiguous_children None: root project sudah pasti - folder
+      terakhir di wrapper_chain ditandai 🟢 Root Project, sisanya 🟡 Wrapper
+      (akan dihapus), lalu isi langsung root project ditampilkan.
+    - Kalau ambiguous_children diisi: root belum bisa dipastikan - semua
+      folder di wrapper_chain masih 🟡 (belum pasti wrapper atau bukan),
+      dan folder-folder kandidat sejajar di ujung chain ditampilkan sebagai
+      pilihan (belum diberi label root/wrapper).
+    """
+    tree = Tree("📦 [bold]ZIP Analyzer[/bold]")
+    node = tree
+    for i, name in enumerate(wrapper_chain):
+        is_last = (i == len(wrapper_chain) - 1)
+        if ambiguous_children is not None:
+            label = f"🟡 {name}"
+        else:
+            label = f"🟢 {name}" if is_last else f"🟡 {name}"
+        node = node.add(label)
+
+    if ambiguous_children is not None:
+        for child in sorted(ambiguous_children):
+            node.add(f"📁 {child}")
+    else:
+        content_tree = _build_zip_tree(zip_path)
+        cur = _tree_node_at(content_tree, wrapper_chain)
+        _attach_children(node, cur)
+
+    console.print(tree)
+
+    if ambiguous_children is None and wrapper_chain:
+        console.print()
+        console.print("🟢 Root Project")
+        console.print("🟡 Wrapper (akan dihapus)")
+
+
+def _render_upload_preview(zip_path: str, root_prefix: str) -> None:
+    """Render 'Upload Preview': struktur akhir yang akan muncul di repository
+    setelah ekstraksi (mengikuti root project yang sudah dipilih/terdeteksi)."""
+    chain = [c for c in root_prefix.split("/") if c] if root_prefix else []
+    content_tree = _build_zip_tree(zip_path)
+    cur = _tree_node_at(content_tree, chain)
+
+    tree = Tree("📤 [bold]Upload Preview[/bold]")
+    _attach_children(tree, cur)
+    console.print(tree)
+
+
+def _print_zip_stats(zip_path: str, wrapper_chain: list) -> None:
+    n_files, n_dirs = _count_zip_items(zip_path)
+    zip_size = os.path.getsize(zip_path)
+
+    stats = Table.grid(padding=(0, 2))
+    stats.add_row("Jumlah wrapper", str(len(wrapper_chain)))
+    stats.add_row("Jumlah folder", str(n_dirs))
+    stats.add_row("Jumlah file", str(n_files))
+    stats.add_row("Ukuran ZIP", human_size(zip_size))
+    console.print(stats)
+
+
+def _zip_target_rel(member_name: str, root_prefix: str) -> Optional[str]:
+    """Path relatif tujuan dengan mempertahankan struktur di dalam root_prefix."""
+    if not root_prefix:
+        return member_name
+        
+    if member_name.startswith(root_prefix):
+        rel = member_name[len(root_prefix):]
+        return rel if rel else None
     return None
 
 
-def _zip_target_rel(member_name: str, strip_wrapper: bool) -> Optional[str]:
-    """Path relatif tujuan (di dalam folder tujuan) untuk satu entri ZIP."""
-    if strip_wrapper:
-        parts = member_name.split("/", 1)
-        rel = parts[1] if len(parts) > 1 else parts[0]
-    else:
-        rel = member_name
-    return rel or None
-
-
-def _compute_zip_diff(zip_path: str, dest_dir: str, strip_wrapper: bool) -> Tuple[int, int, int, int, dict]:
+def _compute_zip_diff(zip_path: str, dest_dir: str, root_prefix: str) -> Tuple[int, int, int, int, dict]:
     """
-    PRIORITAS 3 #13 - Preview Perubahan ZIP.
     Hitung berapa file akan Tambah / Update / Sama / Delete kalau ZIP ini
-    diekstrak ke dest_dir, dibandingkan isi dest_dir SEKARANG.
-    Return (tambah, update, sama, delete, target_map) - target_map dipakai
-    lagi saat proses ekstraksi supaya gak perlu hitung ulang.
+    diekstrak ke dest_dir. Hanya memproses file yang berada di dalam root_prefix.
     """
     tambah = update = sama = 0
-    target_map: dict = {}  # target_path -> zip member name
+    target_map: dict = {}
 
     with zipfile.ZipFile(zip_path, "r") as z:
         for member in z.infolist():
             if member.is_dir():
                 continue
-            rel = _zip_target_rel(member.filename, strip_wrapper)
+            rel = _zip_target_rel(member.filename, root_prefix)
             if not rel:
                 continue
+                
             target_path = os.path.join(dest_dir, rel)
             target_map[target_path] = member.filename
 
@@ -227,7 +427,6 @@ def _compute_zip_diff(zip_path: str, dest_dir: str, strip_wrapper: bool) -> Tupl
             else:
                 sama += 1
 
-    # Delete: file yang SEKARANG ada di dest_dir tapi gak ada di ZIP sama sekali.
     delete = 0
     if os.path.isdir(dest_dir):
         for root, _dirs, files in os.walk(dest_dir):
@@ -241,16 +440,18 @@ def _compute_zip_diff(zip_path: str, dest_dir: str, strip_wrapper: bool) -> Tupl
     return tambah, update, sama, delete, target_map
 
 
-def _confirm_zip_changes(repo: str, branch: str, total_entries: int, wrapper: Optional[str],
-                          strip_wrapper: bool, tambah: int, update: int, sama: int, delete: int) -> bool:
+def _confirm_zip_changes(repo: str, branch: str, total_entries: int, root_prefix: str,
+                          tambah: int, update: int, sama: int, delete: int) -> bool:
     console.print(f"\n[bold]Repository[/bold] : {os.path.basename(repo)}")
     console.print(f"[bold]Branch[/bold]     : {branch}\n")
 
     console.print("[bold cyan]ZIP[/bold cyan]")
     console.print("──────────────")
-    console.print(f"Total File : {total_entries}")
-    if wrapper and strip_wrapper:
-        console.print(f"Folder Pembungkus : {wrapper} (akan dihapus)")
+    console.print(f"Total File yg Diproses : {total_entries}")
+    if root_prefix:
+        console.print(f"Root Project           : {root_prefix} [yellow](wrapper akan dihapus)[/yellow]")
+    else:
+        console.print("Root Project           : (Langsung dari root ZIP)")
 
     console.print("\n[bold cyan]Analisis Perubahan[/bold cyan]")
     console.print("──────────────────")
@@ -278,37 +479,82 @@ def upload_zip_extract() -> None:
         return
 
     try:
-        preview_zip(zip_path)
+        with zipfile.ZipFile(zip_path, "r"):
+            pass
     except zipfile.BadZipFile:
-        log_error("ZIP rusak saat preview", raw_detail=zip_path)
+        console.print("[red]File ZIP rusak atau tidak valid.[/red]")
+        log_error("ZIP rusak saat analisis", raw_detail=zip_path)
         return
+
+    # --- 1. Penentuan Root Proyek & Wrapper ---
+    root_prefix = _detect_zip_root(zip_path)
+
+    if root_prefix.startswith("AMBIGU"):
+        ambiguous_prefix = root_prefix.split(":", 1)[1] if ":" in root_prefix else ""
+        wrapper_chain = [c for c in ambiguous_prefix.split("/") if c]
+
+        # Hanya kandidat yang PERSIS satu level di bawah ambiguous_prefix
+        # (bukan seluruh folder di dalam ZIP, biar gak riuh dengan folder
+        # nested yang gak relevan seperti node_modules/dsb).
+        dirs = set()
+        plen = len(ambiguous_prefix)
+        with zipfile.ZipFile(zip_path, "r") as z:
+            for name in z.namelist():
+                if ambiguous_prefix and not name.startswith(ambiguous_prefix):
+                    continue
+                rel = name[plen:]
+                if not rel:
+                    continue
+                first = rel.split('/')[0]
+                if first:
+                    dirs.add(first)
+
+        # 2. Tampilkan dulu STRUKTUR ZIP, baru pilihan root (bukan langsung
+        #    daftar folder telanjang).
+        console.print("\n[yellow]⚠ Root proyek tidak dapat ditentukan secara otomatis.[/yellow]")
+        _render_zip_structure_tree(zip_path, wrapper_chain, ambiguous_children=dirs)
+        console.print()
+
+        label_root = ambiguous_prefix if ambiguous_prefix else "(root ZIP)"
+        choices = sorted(dirs) + [f"(0 Wrapper - jadikan {label_root} sebagai root apa adanya)", "Batal"]
+        pilihan = questionary.select(
+            "Pilih folder mana yang menjadi Root Project:",
+            choices=choices
+        ).ask()
+
+        if not pilihan or pilihan == "Batal":
+            return
+        if pilihan.startswith("(0 Wrapper"):
+            root_prefix = ambiguous_prefix
+        else:
+            root_prefix = ambiguous_prefix + pilihan + "/"
+
+    wrapper_chain = [c for c in root_prefix.split("/") if c] if root_prefix else []
+
+    # --- 2. ZIP Analyzer (tree + ringkasan) ---
+    console.print()
+    _render_zip_structure_tree(zip_path, wrapper_chain, ambiguous_children=None)
+    console.print()
+    _print_zip_stats(zip_path, wrapper_chain)
+
+    # --- 3. Upload Preview (struktur akhir sesuai root yang dipilih) ---
+    console.print()
+    _render_upload_preview(zip_path, root_prefix)
+    console.print()
 
     dest_dir = pick_folder_in_repo(repo, "Pilih folder tujuan ekstrak di dalam repository:")
     if dest_dir is None:
         return
 
-    wrapper = _has_single_wrapper_folder(zip_path)
-    strip_wrapper = True
-    if wrapper:
-        console.print(f"[cyan]Folder pembungkus terdeteksi: '{wrapper}/'[/cyan]")
-        pilihan = questionary.select(
-            "Bagaimana perlakuan folder pembungkus ini?",
-            choices=["(*) Hapus Folder Pembungkus", "( ) Pertahankan Folder Pembungkus", "Batal"],
-        ).ask()
-        if not pilihan or pilihan == "Batal":
-            return
-        strip_wrapper = pilihan.startswith("(*)")
-
-    # PRIORITAS 3 #13: preview Sama/Tambah/Update/Delete sebelum benar-benar ekstrak
+    # Menghitung diff dengan root yang sudah pasti
     with spinner("Menghitung perubahan..."):
-        tambah, update, sama, delete, target_map = _compute_zip_diff(zip_path, dest_dir, strip_wrapper)
-        with zipfile.ZipFile(zip_path, "r") as z:
-            total_entries = sum(1 for m in z.infolist() if not m.is_dir())
+        tambah, update, sama, delete, target_map = _compute_zip_diff(zip_path, dest_dir, root_prefix)
+        total_entries = len(target_map) # Hanya hitung file yang valid diekstrak
 
     ok_b, branch_now, _e = run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo)
     branch_now = branch_now if ok_b else "-"
 
-    if not _confirm_zip_changes(repo, branch_now, total_entries, wrapper, strip_wrapper, tambah, update, sama, delete):
+    if not _confirm_zip_changes(repo, branch_now, total_entries, root_prefix, tambah, update, sama, delete):
         console.print("[yellow]Dibatalkan.[/yellow]")
         return
 
@@ -334,14 +580,16 @@ def upload_zip_extract() -> None:
                 for member in z.infolist():
                     if member.is_dir():
                         continue
-                    rel = _zip_target_rel(member.filename, strip_wrapper)
+                    
+                    rel = _zip_target_rel(member.filename, root_prefix)
                     if not rel:
-                        progress.advance(task)
                         continue
+                        
                     target_path = os.path.join(dest_dir, rel)
                     if os.path.exists(target_path) and not timpa:
                         progress.advance(task)
                         continue
+                        
                     os.makedirs(os.path.dirname(target_path), exist_ok=True)
                     with z.open(member) as src, open(target_path, "wb") as dst:
                         shutil.copyfileobj(src, dst)
@@ -356,8 +604,6 @@ def upload_zip_extract() -> None:
         return
 
     files_after = count_files_in_dir(repo)
-    # delete selalu 0 di sini: ekstrak ZIP TIDAK PERNAH menghapus file yang
-    # gak ada di ZIP (baris "Delete" di Preview cuma informasi, bukan aksi).
     _tampilkan_ringkasan_upload(
         repo, files_before, files_after, extra_label="Upload ZIP (Extract)",
         override_counts=(tambah, update, 0),
@@ -512,7 +758,7 @@ def show_help() -> None:
         "- Upload File: menyalin satu file ke repository lewat picker (Downloads/Home/Browse/Manual).\n"
         "- Upload Folder: menyalin satu folder utuh ke repository.\n"
         "- Upload ZIP (Extract): mengekstrak isi ZIP ke repository, dengan\n"
-        "  deteksi folder pembungkus dan preview perubahan (Tambah/Update/Delete).\n"
+        "  deteksi cerdas folder pembungkus dan preview perubahan (Tambah/Update/Delete).\n"
         "- Upload ZIP (No Extract): menyalin file ZIP apa adanya, tanpa dibongkar.\n"
     )
     questionary.text("Tekan Enter untuk kembali...").ask()
