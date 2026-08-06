@@ -1,6 +1,74 @@
 # Changelog GitHub Manager
 
+## v1.2.4 (Security & Bugfix pass)
+
+### Fixed - Security
+- **Zip Slip / Path Traversal saat Upload ZIP (Extract)**: entry ZIP dengan
+  path seperti `../../.ssh/authorized_keys` bisa menulis file di LUAR folder
+  repository (mis. menimpa file sistem/config di HP). Sekarang setiap entry
+  divalidasi lewat `safe_zip_member_path()` sebelum ditulis; entry mencurigakan
+  ditolak & dicatat ke log.
+- **Zip Slip saat Restore Backup**: `restore_zip()` sebelumnya pakai
+  `zipfile.extractall()` mentah tanpa validasi path. Sekarang ekstraksi manual
+  per-entry dengan validasi yang sama seperti di atas.
+- **Token/PAT bocor plaintext ke log**: kalau clone pakai URL berkredensial
+  (`https://user:TOKEN@github.com/...`), token sebelumnya ke-tulis apa adanya
+  ke `logs/debug.log` (tiap command git) dan `logs/activity.log` (pesan
+  clone). Ditambahkan `redact_secrets()` yang otomatis mask token jadi `***`
+  sebelum ditulis ke log atau ditampilkan di Dashboard (remote URL).
+- **Command Injection di "Buka Lokasi" (Repository Manager)**: path folder
+  di-interpolate langsung ke `os.system(f"termux-open '{path}'")` - nama
+  folder dengan karakter khusus (`'`, `;`) bisa keluar dari konteks argumen
+  dan mengeksekusi command lain. Diganti ke `subprocess.run(["termux-open",
+  path])` (list args, tidak lewat shell).
+
+### Fixed - Bugs
+- **"Sync Branch" selalu crash (`NameError`)**: fungsi `sync_branch()` di
+  `branch.py` memakai `spinner()` tapi modulnya tidak pernah di-import.
+  Fitur ini 100% gagal setiap kali dipanggil sebelum fix ini.
+- **Push/Pull/Merge conflict = jalan buntu**: sebelumnya kalau kena conflict
+  atau push rejected, user cuma dikasih pesan error lalu mentok - tidak ada
+  opsi lanjutan dari dalam aplikasi. Sekarang:
+  - Pull yang gagal karena working tree kotor: ditawarkan Stash & Pull
+    otomatis (dengan auto stash-pop setelahnya).
+  - Pull yang gagal karena conflict: ditawarkan Abort (`merge --abort`) atau
+    lanjut manual.
+  - Push yang ditolak (rejected): ditawarkan langsung Pull dari situ juga.
+  - Merge conflict: ditawarkan Abort merge langsung, bukan cuma disuruh
+    "selesaikan manual".
+- **`count_files_in_dir()` salah hitung file hidden**: fungsi ini ikut
+  menghitung file/folder yang diawali titik (`.env`, dll), tidak konsisten
+  dengan `list_top_level_dirs()`/`find_git_repos()` yang mengecualikannya.
+  Menyebabkan angka "X file berubah" di ringkasan Upload bisa salah. Sudah
+  konsisten sekarang - `tests/test_utils.py` yang sebelumnya FAIL di test
+  ini sekarang PASS.
+- **`install.sh` tidak membuat command `github-manager`**: README menjanjikan
+  installer membuat command `github-manager` yang bisa dipanggil dari folder
+  mana saja, tapi installer sebelumnya tidak pernah melakukan itu - cuma
+  `python github-manager.py` yang jalan. Ditambahkan step yang membuat
+  wrapper script di `$PREFIX/bin/github-manager`.
+
+### Testing
+- Semua 18 file `.py` dicek `python3 -m py_compile` - tidak ada syntax error.
+- `tests/test_utils.py` dijalankan dengan stub `rich`/`questionary` (sandbox
+  tanpa akses internet buat install dependency asli) - 18/18 test PASS
+  (1 test tadinya FAIL sebelum fix `count_files_in_dir`).
+- Static scan custom (AST-based) ke semua fungsi untuk cari nama yang dipakai
+  tapi tidak pernah di-import/didefinisikan (pola yang sama dengan bug
+  `spinner`) - bersih, tidak ada kasus lain.
+- `safe_zip_member_path()` dan `redact_secrets()` ditest manual dengan kasus
+  path traversal (`../../etc/passwd`, absolute path) dan URL bertoken -
+  semuanya berperilaku sesuai ekspektasi.
+- `bash -n install.sh` - syntax valid.
+- **Belum** dijalankan end-to-end di Termux asli (sandbox ini tidak punya
+  akses internet untuk install `rich`/`questionary`/`colorama`, dan tidak
+  ada real Git remote untuk test skenario network/conflict sungguhan) -
+  mohon divalidasi manual di Termux sebelum dianggap final.
+
+---
+
 ## v1.2.0
+
 
 ### Fixed
 - **Bug Pull Request**: sebelumnya gagal membuat PR jika branch lokal
