@@ -10,7 +10,7 @@ from typing import Optional, Tuple
 import questionary
 from rich.console import Console
 
-from modules.utils import run_git, is_git_repo, find_git_repos, normalize_repo_url, GitError, spinner
+from modules.utils import run_git, is_git_repo, find_git_repos, normalize_repo_url, GitError, spinner, redact_secrets
 from modules.settings import load_config, save_config, get_repositories, add_to_repositories, toggle_favorite, remove_from_repositories
 from modules.logger import log_activity, log_error
 from datetime import datetime
@@ -142,7 +142,7 @@ def clone_repository() -> None:
         log_error("Clone repository gagal", raw_detail=err)
         return
     console.print(f"[green]Clone berhasil ke {dest_path}.[/green]\n{out}")
-    log_activity(f"Repository di-clone dari {url} ke {dest_path}")
+    log_activity(redact_secrets(f"Repository di-clone dari {url} ke {dest_path}"))
 
     jadikan_aktif = questionary.confirm(
         f"Jadikan '{nama_default}' sebagai repository aktif?", default=True
@@ -432,7 +432,7 @@ def _reclone_repository(repo: str) -> None:
         import shutil as _shutil
         with spinner("Menghapus folder lama..."):
             _shutil.rmtree(repo)
-        with spinner(f"Clone ulang dari {url}..."):
+        with spinner(redact_secrets(f"Clone ulang dari {url}...")):
             ok2, out, err = run_git(["clone", url, repo])
         if not ok2:
             console.print(f"[red]Clone ulang gagal: {_human_git_error(err)}[/red]")
@@ -671,9 +671,16 @@ def use_repo(path: str) -> None:
 def open_location(path: str) -> None:
     """Buka lokasi di file manager (Termux), fallback tampilkan path kalau termux-open tidak ada."""
     import shutil
+    import subprocess
     if shutil.which("termux-open"):
-        exit_code = os.system(f"termux-open '{path}'")
-        if exit_code != 0:
+        # SECURITY: pakai list args (bukan os.system + f-string) supaya path
+        # dengan karakter khusus (', ;, $, dll) tidak bisa keluar dari
+        # konteks argumen dan dieksekusi sebagai perintah shell terpisah.
+        try:
+            result = subprocess.run(["termux-open", path], timeout=10)
+            if result.returncode != 0:
+                console.print(f"[yellow]Gagal membuka file manager. Lokasi: {path}[/yellow]")
+        except (OSError, subprocess.TimeoutExpired):
             console.print(f"[yellow]Gagal membuka file manager. Lokasi: {path}[/yellow]")
     else:
         console.print(f"[cyan]termux-open tidak tersedia. Lokasi repository: {path}[/cyan]")

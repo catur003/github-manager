@@ -21,7 +21,7 @@ from rich.tree import Tree
 
 from modules.utils import (
     run_git, count_files_in_dir, human_size, pick_folder_in_repo,
-    sha1_of_file, sha1_of_bytes, spinner,
+    sha1_of_file, sha1_of_bytes, spinner, safe_zip_member_path,
 )
 from modules.settings import load_config
 from modules.logger import log_activity, log_error
@@ -411,8 +411,13 @@ def _compute_zip_diff(zip_path: str, dest_dir: str, root_prefix: str) -> Tuple[i
             rel = _zip_target_rel(member.filename, root_prefix)
             if not rel:
                 continue
-                
-            target_path = os.path.join(dest_dir, rel)
+
+            # SECURITY: Zip Slip protection - tolak entry yang path-nya
+            # keluar dari dest_dir (mis. lewat '../../') sebelum dihitung
+            # sebagai perubahan, biar preview diff juga akurat/aman.
+            target_path = safe_zip_member_path(dest_dir, rel)
+            if target_path is None:
+                continue
             target_map[target_path] = member.filename
 
             if not os.path.exists(target_path):
@@ -584,8 +589,15 @@ def upload_zip_extract() -> None:
                     rel = _zip_target_rel(member.filename, root_prefix)
                     if not rel:
                         continue
-                        
-                    target_path = os.path.join(dest_dir, rel)
+
+                    # SECURITY: Zip Slip protection - entry yang mencoba
+                    # keluar dari dest_dir ditolak dan di-skip, bukan ditulis.
+                    target_path = safe_zip_member_path(dest_dir, rel)
+                    if target_path is None:
+                        log_error("Zip Slip diblokir", raw_detail=f"entry ditolak: {member.filename}")
+                        progress.advance(task)
+                        continue
+
                     if os.path.exists(target_path) and not timpa:
                         progress.advance(task)
                         continue

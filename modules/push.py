@@ -37,6 +37,18 @@ def push() -> None:
         console.print(f"[red]Push gagal: {_friendly(err)}[/red]")
         log_activity("Push gagal")
         log_error("Push gagal", raw_detail=err)
+        # BUGFIX: dulu mentok di sini kalau ditolak (rejected/non-fast-forward)
+        # - user disaranin "Pull dulu" di teks tapi gak ada opsi buat
+        # langsung ngelakuinnya. Sekarang ditawarkan langsung dari sini.
+        if "rejected" in err.lower():
+            mau_pull = questionary.confirm(
+                "Ada perubahan baru di remote. Pull sekarang lalu coba Push lagi?",
+                default=True,
+            ).ask()
+            if mau_pull:
+                from modules import pull as pull_module
+                pull_module.pull()
+                console.print("[cyan]Silakan jalankan Push lagi jika Pull tadi berhasil.[/cyan]")
         return
     ok2, commit_hash, _e = run_git(["rev-parse", "--short", "HEAD"], cwd=repo)
     console.print(

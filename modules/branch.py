@@ -7,7 +7,7 @@ import questionary
 from rich.console import Console
 from rich.table import Table
 
-from modules.utils import run_git
+from modules.utils import run_git, spinner
 from modules.settings import load_config
 from modules.logger import log_activity, log_error
 

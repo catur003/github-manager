@@ -29,13 +29,15 @@ def pull() -> None:
         return
     # PRIORITAS 1 #2/#1: pre-flight check + auto upstream sebelum pull,
     # supaya user gak pernah lihat "no tracking information" mentah.
+    # need_clean=False sengaja - working tree kotor BUKAN alasan blocking,
+    # tapi kalau nanti pull gagal karena itu, kita tawarkan jalan keluar
+    # (bukan cuma dead-end error) lewat _handle_pull_failure di bawah.
     if not preflight.preflight(repo, need_remote=True, need_upstream=True, label="Pull"):
         return
     with spinner("Mengambil (pull) perubahan terbaru dari remote..."):
         ok, out, err = run_git(["pull"], cwd=repo, timeout=120)
     if not ok:
-        console.print(f"[red]Pull gagal: {_friendly(err)}[/red]")
-        log_error("Pull gagal", raw_detail=err)
+        _handle_pull_failure(repo, err)
         return
     n_commit = out.count("\n") if out else 0
     console.print(f"[green]✓ Pull Berhasil[/green]\n\n{out or 'Sudah paling baru (tidak ada perubahan).'}")
@@ -45,6 +47,84 @@ def pull() -> None:
     run_git(["status", "--short"], cwd=repo)
     run_git(["branch", "-vv"], cwd=repo)
     run_git(["remote", "-v"], cwd=repo)
+
+
+def _handle_pull_failure(repo: str, err: str) -> None:
+    """
+    BUGFIX: dulu kalau Pull gagal (working tree kotor / conflict), user cuma
+    dikasih pesan lalu mentok - gak ada jalan lanjut dari dalam menu, harus
+    keluar aplikasi dan benerin manual. Sekarang: deteksi jenis kegagalan
+    dan tawarkan aksi konkret langsung dari sini.
+    """
+    low = err.lower()
+    console.print(f"[red]Pull gagal: {_friendly(err)}[/red]")
+    log_error("Pull gagal", raw_detail=err)
+
+    if "would be overwritten" in low or "local changes" in low:
+        console.print(
+            "[yellow]Ada perubahan lokal yang belum di-commit dan bentrok "
+            "dengan perubahan dari remote.[/yellow]"
+        )
+        aksi = questionary.select(
+            "Pilih aksi:",
+            choices=[
+                "Stash perubahan lokal lalu Pull (bisa dikembalikan nanti)",
+                "Batalkan Pull (commit dulu manual lewat menu Git Add/Commit)",
+                "Kembali",
+            ],
+        ).ask()
+        if aksi and aksi.startswith("Stash"):
+            ok_s, out_s, err_s = run_git(["stash", "push", "-u", "-m", "auto-stash-before-pull"], cwd=repo)
+            if not ok_s:
+                console.print(f"[red]Gagal stash: {err_s}[/red]")
+                log_error("Gagal stash sebelum pull", raw_detail=err_s)
+                return
+            console.print("[green]✓ Perubahan lokal di-stash.[/green]")
+            with spinner("Mengambil (pull) perubahan terbaru dari remote..."):
+                ok2, out2, err2 = run_git(["pull"], cwd=repo, timeout=120)
+            if not ok2:
+                console.print(f"[red]Pull masih gagal: {_friendly(err2)}[/red]")
+                console.print("[yellow]Perubahan kamu masih aman di stash. Jalankan 'git stash pop' manual setelah masalah selesai.[/yellow]")
+                log_error("Pull gagal setelah stash", raw_detail=err2)
+                return
+            console.print(f"[green]✓ Pull Berhasil[/green]\n\n{out2 or '-'}")
+            log_activity("Pull berhasil (setelah auto-stash)")
+            record_repo_event(repo, "last_pull")
+            ok_p, out_p, err_p = run_git(["stash", "pop"], cwd=repo)
+            if ok_p:
+                console.print("[green]✓ Perubahan lokal dikembalikan (stash pop).[/green]")
+            else:
+                console.print(
+                    "[yellow]⚠ Gagal auto stash-pop (kemungkinan conflict). "
+                    "Perubahan kamu tetap aman di stash - selesaikan manual "
+                    "dengan 'git stash pop' lalu beresin conflict-nya.[/yellow]"
+                )
+                log_error("Gagal stash pop setelah pull", raw_detail=err_p)
+        return
+
+    if "conflict" in low:
+        console.print(
+            "[yellow]Terjadi conflict saat pull. File yang bentrok:[/yellow]"
+        )
+        ok_s, status_out, _e = run_git(["status", "--short"], cwd=repo)
+        if ok_s and status_out:
+            console.print(status_out)
+        aksi = questionary.select(
+            "Pilih aksi:",
+            choices=[
+                "Batalkan Pull ini (git merge --abort, kembali ke kondisi sebelum pull)",
+                "Selesaikan manual (biarkan, saya edit file lalu Add & Commit sendiri)",
+                "Kembali",
+            ],
+        ).ask()
+        if aksi and aksi.startswith("Batalkan"):
+            ok_a, _out_a, err_a = run_git(["merge", "--abort"], cwd=repo)
+            if ok_a:
+                console.print("[green]✓ Pull dibatalkan, repository kembali ke kondisi sebelum pull.[/green]")
+                log_activity("Pull dibatalkan (merge --abort)")
+            else:
+                console.print(f"[red]Gagal membatalkan: {err_a}[/red]")
+                log_error("Gagal merge --abort setelah pull conflict", raw_detail=err_a)
 
 
 def fetch() -> None:
@@ -81,6 +161,8 @@ def _friendly(err: str) -> str:
     low = err.lower()
     if "could not resolve host" in low or "network" in low:
         return "Tidak dapat terhubung ke internet. Periksa koneksi kamu."
+    if "would be overwritten" in low or "local changes" in low:
+        return "Ada perubahan lokal belum di-commit yang bentrok dengan perubahan dari remote."
     if "conflict" in low:
         return "Terjadi conflict saat pull. Selesaikan conflict terlebih dahulu."
     if "authentication" in low or "permission denied" in low:

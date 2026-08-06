@@ -136,9 +136,27 @@ def merge_lokal() -> None:
             ok2, status_out, _err2 = run_git(["status"], cwd=repo)
             if ok2:
                 console.print(status_out)
-            console.print("[yellow]Selesaikan conflict secara manual, lalu lakukan Git Add dan Commit.[/yellow]")
             log_activity(f"Merge {source} ke {target} gagal - conflict")
             log_error("Merge conflict", raw_detail=err)
+            # BUGFIX: dulu mentok di sini - cuma dikasih tau "selesaikan manual"
+            # tanpa opsi lanjutan. Sekarang ditawarkan Abort langsung.
+            aksi = questionary.select(
+                "Pilih aksi:",
+                choices=[
+                    "Batalkan merge ini (git merge --abort, kembali ke kondisi sebelum merge)",
+                    "Selesaikan manual (saya edit file lalu Add & Commit sendiri)",
+                ],
+            ).ask()
+            if aksi and aksi.startswith("Batalkan"):
+                ok_a, _out_a, err_a = run_git(["merge", "--abort"], cwd=repo)
+                if ok_a:
+                    console.print("[green]✓ Merge dibatalkan, repository kembali ke kondisi sebelum merge.[/green]")
+                    log_activity(f"Merge {source} ke {target} dibatalkan (abort)")
+                else:
+                    console.print(f"[red]Gagal membatalkan merge: {err_a}[/red]")
+                    log_error("Gagal merge --abort", raw_detail=err_a)
+            else:
+                console.print("[yellow]Selesaikan conflict secara manual, lalu lakukan Git Add dan Commit.[/yellow]")
             return
         console.print(f"[red]Merge gagal: {err}[/red]")
         log_error("Merge gagal", raw_detail=err)

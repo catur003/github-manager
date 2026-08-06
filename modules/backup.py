@@ -14,7 +14,7 @@ import questionary
 from rich.console import Console
 from rich.table import Table
 
-from modules.utils import BACKUP_DIR, ensure_dirs, human_size
+from modules.utils import BACKUP_DIR, ensure_dirs, human_size, safe_zip_member_path
 from modules.settings import load_config
 from modules.logger import log_activity, log_error
 
@@ -114,8 +114,23 @@ def restore_zip() -> None:
             return
     zip_path = BACKUP_DIR / pilihan
     try:
+        # SECURITY: Zip Slip protection - jangan pakai extractall() langsung,
+        # validasi tiap entry supaya tidak bisa menulis di luar folder repo.
         with zipfile.ZipFile(zip_path, "r") as z:
-            z.extractall(repo)
+            skipped = 0
+            for member in z.infolist():
+                if member.is_dir():
+                    continue
+                target_path = safe_zip_member_path(repo, member.filename)
+                if target_path is None:
+                    skipped += 1
+                    log_error("Zip Slip diblokir saat restore", raw_detail=f"entry ditolak: {member.filename}")
+                    continue
+                os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                with z.open(member) as src, open(target_path, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+            if skipped:
+                console.print(f"[yellow]⚠ {skipped} entry mencurigakan di ZIP backup dilewati (tidak diekstrak).[/yellow]")
     except zipfile.BadZipFile as e:
         console.print("[red]File backup rusak atau tidak valid.[/red]")
         log_error("Gagal restore backup, ZIP rusak", e)

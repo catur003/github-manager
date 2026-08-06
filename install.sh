@@ -136,6 +136,30 @@ echo "== Mengecek Python =="
 python --version
 
 echo
+echo "== Membuat command 'github-manager' =="
+
+# BUGFIX: README menjanjikan command 'github-manager' bisa dipanggil dari
+# folder mana saja setelah install, tapi sebelumnya installer TIDAK PERNAH
+# membuatnya - cuma 'python github-manager.py' yang jalan. Sekarang bikin
+# wrapper script di $PREFIX/bin (selalu ada di PATH Termux) yang cd ke
+# folder project ini lalu jalankan github-manager.py, apapun folder aktif
+# user saat command dipanggil.
+INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BIN_DIR="${PREFIX:-/data/data/com.termux/files/usr}/bin"
+
+if [ -d "$BIN_DIR" ]; then
+    cat > "$BIN_DIR/github-manager" <<WRAPPER
+#!/data/data/com.termux/files/usr/bin/bash
+cd "$INSTALL_DIR" && exec python github-manager.py "\$@"
+WRAPPER
+    chmod +x "$BIN_DIR/github-manager"
+    echo -e "${GREEN}[✓] Command 'github-manager' berhasil dibuat di $BIN_DIR${NC}"
+else
+    echo -e "${YELLOW}[!] $BIN_DIR tidak ditemukan - command 'github-manager' tidak dibuat.${NC}"
+    echo -e "${YELLOW}    Jalankan aplikasi manual dengan: python $INSTALL_DIR/github-manager.py${NC}"
+fi
+
+echo
 echo "== Permission =="
 chmod +x install.sh
 chmod +x github-manager.py

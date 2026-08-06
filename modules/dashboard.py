@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from modules.utils import run_git, is_git_repo, now_str
+from modules.utils import run_git, is_git_repo, now_str, redact_secrets
 from modules.settings import load_config, get_repo_event
 
 console = Console()
@@ -42,7 +42,7 @@ def get_status_summary(repo_path: str) -> dict:
         first_line = remotes.splitlines()[0]
         parts = first_line.split()
         if len(parts) >= 2:
-            info["remote"] = parts[1]
+            info["remote"] = redact_secrets(parts[1])
     # PRIORITAS 4: field "Connected" - terhubung ke remote atau enggak
     info["connected"] = "Ya" if info["remote"] != "-" else "Tidak (belum ada remote)"
 

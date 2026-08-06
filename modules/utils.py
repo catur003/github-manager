@@ -82,9 +82,9 @@ def run_git(args: List[str], cwd: Optional[str] = None,
         # biar gak circular import, karena logger.py juga import utils.py)
         from modules.logger import log_debug
         log_debug(
-            f"git {' '.join(args)} | cwd={cwd or '.'} | exit={result.returncode}"
+            redact_secrets(f"git {' '.join(args)} | cwd={cwd or '.'} | exit={result.returncode}")
         )
-        return success, result.stdout.strip(), result.stderr.strip()
+        return success, result.stdout.strip(), redact_secrets(result.stderr.strip())
     except FileNotFoundError:
         return False, "", "Git tidak ditemukan. Pastikan git sudah terinstall (pkg install git)."
     except subprocess.TimeoutExpired:
@@ -199,11 +199,15 @@ def human_size(num_bytes: float) -> str:
 def count_files_in_dir(path: str) -> int:
     """Hitung jumlah file (bukan folder) di dalam path secara rekursif.
     Folder .git dikecualikan karena isinya ratusan file internal git
-    (objects/refs) yang bukan bagian dari file project."""
+    (objects/refs) yang bukan bagian dari file project. File/folder hidden
+    lain (diawali '.') juga dikecualikan, konsisten dengan konvensi yang
+    sama di list_top_level_dirs()/find_git_repos() - supaya hitungan
+    'X file berubah' di ringkasan Upload gak salah gara-gara file
+    konfigurasi hidden (.env, dll) ikut kehitung."""
     total = 0
     for root, dirs, files in os.walk(path):
-        dirs[:] = [d for d in dirs if d != ".git"]
-        total += len(files)
+        dirs[:] = [d for d in dirs if d != ".git" and not d.startswith(".")]
+        total += len([f for f in files if not f.startswith(".")])
     return total
 
 
@@ -213,6 +217,36 @@ def safe_copy_tree(src: str, dst: str) -> None:
         shutil.copytree(src, dst, dirs_exist_ok=True)
     else:
         shutil.copytree(src, dst)
+
+
+def redact_secrets(text: str) -> str:
+    """
+    Samarkan kredensial (token/password) yang mungkin nempel di URL git
+    (pola 'https://user:TOKEN@host/...') sebelum ditulis ke log atau
+    ditampilkan ke layar. Dipakai di semua titik logging (log_activity,
+    log_debug) supaya token GitHub PAT dsb tidak pernah tersimpan
+    plaintext di logs/*.log.
+    """
+    import re
+    return re.sub(r'(https?://)([^/@\s:]+):([^/@\s]+)@', r'\1\2:***@', text)
+
+
+def safe_zip_member_path(dest_dir: str, member_name: str) -> Optional[str]:
+    """
+    PRIORITAS SECURITY - Zip Slip protection.
+    Hitung path absolut tujuan untuk sebuah entry ZIP, dan pastikan hasilnya
+    tetap berada di dalam dest_dir. Entry yang mengandung '../', path absolut,
+    atau trik lain untuk keluar dari dest_dir akan ditolak (return None).
+    Semua kode yang mengekstrak ZIP (upload, restore backup, update) WAJIB
+    lewat fungsi ini, jangan langsung os.path.join(dest_dir, member_name).
+    """
+    dest_abs = os.path.realpath(dest_dir)
+    # Buang null byte & normalisasi separator sebelum join
+    member_name = member_name.replace("\x00", "")
+    target = os.path.realpath(os.path.join(dest_abs, member_name))
+    if target == dest_abs or target.startswith(dest_abs + os.sep):
+        return target
+    return None
 
 
 def confirm_text(expected: str, prompt_text: str) -> bool:
