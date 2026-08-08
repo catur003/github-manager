@@ -13,7 +13,10 @@ perintah Git. Dibuat khusus agar nyaman dipakai di **Termux Android**
 - Upload ZIP / File / Folder ke repository, lengkap dengan preview isi ZIP
   dan backup otomatis sebelum overwrite
 - Git Add, Commit (termasuk amend & riwayat), Push (dengan proteksi Force
-  Push), Pull/Fetch, Merge lokal dengan deteksi conflict
+  Push), Pull/Fetch, Merge lokal dengan deteksi conflict, Cherry-pick commit
+- Stash (simpan, terapkan, pop, lihat isi, jadikan branch, hapus)
+- Rebase (rebase ke branch lain, update dari upstream, lanjut/lewati/batalkan
+  saat conflict)
 - Backup & Restore repository dalam bentuk ZIP
 - Menu "Belajar Git" — penjelasan konsep Git dalam bahasa Indonesia sederhana
 - Log aktivitas & log error terpisah, tanpa traceback yang membingungkan
@@ -81,6 +84,8 @@ github-manager/
     ├── push.py
     ├── pull.py
     ├── merge.py
+    ├── stash.py
+    ├── rebase.py
     ├── backup.py
     ├── settings.py
     ├── help.py
@@ -110,7 +115,9 @@ dependency tetap sesuai.
 4. Gunakan **4. Git Add** untuk staging, lalu **5. Commit** untuk menyimpan
    perubahan dengan pesan commit.
 5. Gunakan **6. Push** untuk mengirim perubahan ke GitHub.
-6. Bila baru belajar Git, buka menu **11. Belajar Git** untuk penjelasan
+6. Perlu simpan perubahan sementara tanpa commit? Pakai menu **9. Stash**.
+   Perlu riwayat commit yang lurus? Pakai menu **10. Rebase**.
+7. Bila baru belajar Git, buka menu **13. Belajar Git** untuk penjelasan
    istilah-istilah dasar.
 
 ## Catatan Keamanan

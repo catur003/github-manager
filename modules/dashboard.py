@@ -29,6 +29,8 @@ def get_status_summary(repo_path: str) -> dict:
         "changed_files": 0,
         "last_push": "-",
         "last_pull": "-",
+        "stash_count": 0,
+        "rebase_in_progress": False,
     }
     if not is_git_repo(repo_path):
         return info
@@ -81,6 +83,18 @@ def get_status_summary(repo_path: str) -> dict:
     info["last_push"] = get_repo_event(repo_path, "last_push")
     info["last_pull"] = get_repo_event(repo_path, "last_pull")
 
+    # Jumlah stash tersimpan & status rebase - supaya user langsung sadar
+    # dari dashboard kalau ada stash menumpuk atau rebase yang belum
+    # kelar (bukan cuma ketahuan pas buka menu Stash/Rebase satu-satu).
+    # Lazy import modules.preflight, konsisten dengan pola import lazy
+    # lain di codebase ini (utils.py -> logger, branch.py -> pull/push)
+    # supaya tidak menambah risiko circular import di level modul.
+    from modules import preflight
+    ok, stash_out, _ = run_git(["stash", "list"], cwd=repo_path)
+    if ok:
+        info["stash_count"] = len([l for l in stash_out.splitlines() if l.strip()])
+    info["rebase_in_progress"] = preflight.is_rebase_in_progress(repo_path)
+
     return info
 
 
@@ -114,6 +128,10 @@ def show_dashboard() -> None:
     table.add_row("Jumlah file berubah:", str(info["changed_files"]))
     table.add_row("Terakhir Push:", info["last_push"])
     table.add_row("Terakhir Pull:", info["last_pull"])
+    stash_label = str(info["stash_count"]) if info["stash_count"] else "0"
+    table.add_row("Stash Tersimpan:", stash_label)
+    if info["rebase_in_progress"]:
+        table.add_row("Status Rebase:", "[red]⚠ Sedang berlangsung, belum selesai (lihat menu Rebase)[/red]")
     table.add_row("Tanggal & Jam:", now_str())
 
     console.print(Panel(table, title="[bold cyan]Dashboard[/bold cyan]", expand=False))

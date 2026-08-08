@@ -46,6 +46,24 @@ MATERI = {
     "Merge": (
         "Merge menggabungkan perubahan dari satu branch ke branch lain."
     ),
+    "Stash": (
+        "Stash menyimpan perubahan yang belum di-commit secara sementara,\n"
+        "supaya working tree bisa dikosongkan tanpa harus commit dulu.\n"
+        "Berguna saat mau pindah branch atau pull padahal masih ada\n"
+        "perubahan setengah jadi. Perubahan itu bisa diambil lagi kapan saja."
+    ),
+    "Rebase": (
+        "Rebase menerapkan ulang (replay) commit dari satu branch di atas\n"
+        "branch lain, menghasilkan riwayat commit yang lurus - beda dengan\n"
+        "Merge yang membuat satu commit gabungan baru. Karena mengubah\n"
+        "riwayat commit, hindari rebase branch yang sudah di-push dan\n"
+        "dipakai orang lain."
+    ),
+    "Cherry-pick": (
+        "Cherry-pick mengambil SATU commit tertentu dari branch lain dan\n"
+        "menerapkannya ke branch aktif, tanpa ikut menggabungkan commit lain\n"
+        "di branch itu (beda dengan Merge yang menggabungkan semuanya)."
+    ),
     "Force Push": (
         "Force Push memaksa remote memakai riwayat commit dari lokal kamu,\n"
         "walau berbeda dengan riwayat di server. Berbahaya karena bisa\n"

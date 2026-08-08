@@ -1,5 +1,40 @@
 # Changelog GitHub Manager
 
+## v1.3.0 (Fitur: Stash, Rebase, Cherry-pick)
+
+### Ditambahkan
+- **Menu Stash (baru, menu utama #9)**: Simpan Stash (pesan opsional,
+  opsi sertakan file untracked), Lihat Daftar Stash, Terapkan Stash
+  (apply, tidak menghapus stash), Pop Stash, Lihat Isi Stash (diff),
+  Stash ke Branch Baru (`stash branch`), Hapus Stash (per-item), Hapus
+  Semua Stash (destruktif, wajib ketik `YA` seperti Force Push).
+  Konflik saat apply/pop ditangani eksplisit: stash TIDAK hilang kalau
+  gagal, user diarahkan menyelesaikan manual.
+- **Menu Rebase (baru, menu utama #10)**: Rebase Branch Aktif (pilih
+  target, replay commit di atasnya), Update dari Upstream (Rebase) -
+  alternatif Pull yang menghasilkan riwayat lurus tanpa merge commit,
+  Lanjutkan/Lewati/Batalkan Rebase saat conflict, Status Rebase. Ada
+  guard supaya tidak bisa mulai rebase baru kalau rebase sebelumnya
+  belum selesai (deteksi lewat `.git/rebase-merge` atau
+  `.git/rebase-apply`, fungsi `preflight.is_rebase_in_progress()`).
+- **Cherry-pick Commit (menu Merge)**: ambil satu commit tertentu dari
+  branch lain dan terapkan ke branch aktif tanpa menggabungkan seluruh
+  branch. Termasuk "Lanjutkan Cherry-pick" untuk melanjutkan setelah
+  conflict diselesaikan manual, plus opsi Abort/Skip langsung saat
+  conflict terjadi.
+- **Dashboard**: baris baru "Stash Tersimpan" (jumlah stash aktif) dan
+  peringatan "Status Rebase" kalau ada rebase yang belum selesai -
+  supaya user langsung sadar dari layar utama, bukan baru ketahuan
+  kalau kebetulan buka menu Stash/Rebase.
+- Materi baru di menu "Belajar Git": Stash, Rebase, Cherry-pick.
+- `tests/test_stash.py`: unit test untuk parser murni `_parse_stash_entry()`.
+
+### Perubahan
+- Nomor menu utama bergeser karena ada 2 menu baru: Backup sekarang
+  #11 (dulu #9), Git Status #12 (dulu #10), Belajar Git #13 (dulu
+  #11), Pengaturan #14, Log Aktivitas #15, Cek Update #16, Log Debug
+  #17 (mengikuti pergeseran yang sama).
+
 ## v1.2.4 (Security & Bugfix pass)
 
 ### Fixed - Security

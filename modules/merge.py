@@ -180,6 +180,123 @@ def merge_lokal() -> None:
         log_activity(f"Branch {source} dihapus setelah merge")
 
 
+def _list_commits(repo: str, ref: str, n: int = 20) -> list[tuple[str, str]]:
+    """Ambil n commit terakhir dari sebuah ref sebagai list (hash pendek, pesan)."""
+    ok, out, _err = run_git(["log", ref, f"-{n}", "--pretty=format:%h|%s"], cwd=repo)
+    if not ok or not out:
+        return []
+    result = []
+    for line in out.splitlines():
+        h, _sep, msg = line.partition("|")
+        if h.strip():
+            result.append((h.strip(), msg.strip()))
+    return result
+
+
+def cherry_pick() -> None:
+    """Ambil satu commit dari branch lain dan terapkan ke branch aktif,
+    tanpa menggabungkan seluruh branch (beda dengan Merge Lokal)."""
+    repo = _get_active_repo()
+    if not repo:
+        return
+    # Cherry-pick butuh working tree bersih (sama seperti Merge Lokal),
+    # tidak butuh remote/internet karena murni operasi lokal.
+    if not preflight.preflight(repo, need_remote=False, need_clean=True, label="Cherry-pick"):
+        return
+
+    current = preflight.get_current_branch(repo)
+    sumber_choices = [b for b in _list_branches(repo) if b != current]
+    if not sumber_choices:
+        console.print("[yellow]Tidak ada branch lain sebagai sumber commit.[/yellow]")
+        return
+    sumber = questionary.select("Ambil commit dari branch:", choices=sumber_choices + ["Batal"]).ask()
+    if not sumber or sumber == "Batal":
+        return
+
+    commits = _list_commits(repo, sumber)
+    if not commits:
+        console.print(f"[yellow]Tidak ada commit di branch '{sumber}'.[/yellow]")
+        return
+    labels = [f"{h} - {msg}" for h, msg in commits]
+    pilihan = questionary.select("Pilih commit yang akan diambil (cherry-pick):", choices=labels + ["Batal"]).ask()
+    if not pilihan or pilihan == "Batal":
+        return
+    commit_hash = commits[labels.index(pilihan)][0]
+
+    console.print(f"[cyan]Akan menerapkan commit '{commit_hash}' dari '{sumber}' ke branch aktif ('{current}').[/cyan]")
+    yakin = questionary.confirm("Lanjutkan cherry-pick?", default=True).ask()
+    if not yakin:
+        console.print("[yellow]Dibatalkan.[/yellow]")
+        return
+
+    with spinner(f"Cherry-pick commit '{commit_hash}'..."):
+        ok, out, err = run_git(["cherry-pick", commit_hash], cwd=repo)
+    if not ok:
+        if "conflict" in (out + err).lower() or "after resolving the conflicts" in (out + err).lower():
+            console.print(f"[red]Terjadi CONFLICT saat cherry-pick commit '{commit_hash}'.[/red]")
+            ok2, status_out, _e = run_git(["status", "--short"], cwd=repo)
+            if ok2 and status_out:
+                console.print(status_out)
+            log_activity(f"Cherry-pick {commit_hash} gagal - conflict")
+            log_error("Cherry-pick conflict", raw_detail=err)
+            aksi = questionary.select(
+                "Pilih aksi:",
+                choices=[
+                    "Batalkan cherry-pick ini (abort, kembali ke kondisi sebelumnya)",
+                    "Selesaikan manual (edit file, Git Add, lalu Lanjutkan Cherry-pick dari menu ini)",
+                    "Lewati commit ini (skip)",
+                ],
+            ).ask()
+            if aksi and aksi.startswith("Batalkan"):
+                ok_a, _out_a, err_a = run_git(["cherry-pick", "--abort"], cwd=repo)
+                if ok_a:
+                    console.print("[green]✓ Cherry-pick dibatalkan.[/green]")
+                    log_activity(f"Cherry-pick {commit_hash} dibatalkan (abort)")
+                else:
+                    console.print(f"[red]Gagal membatalkan cherry-pick: {err_a}[/red]")
+                    log_error("Gagal cherry-pick --abort", raw_detail=err_a)
+            elif aksi and aksi.startswith("Lewati"):
+                ok_s, _out_s, err_s = run_git(["cherry-pick", "--skip"], cwd=repo)
+                if ok_s:
+                    console.print("[green]✓ Commit dilewati.[/green]")
+                    log_activity(f"Cherry-pick {commit_hash} dilewati (skip)")
+                else:
+                    console.print(f"[red]Gagal melewati commit: {err_s}[/red]")
+                    log_error("Gagal cherry-pick --skip", raw_detail=err_s)
+            else:
+                console.print(
+                    "[yellow]Selesaikan conflict secara manual, Git Add filenya, lalu pilih "
+                    "'Lanjutkan Cherry-pick' dari menu Merge.[/yellow]"
+                )
+            return
+        console.print(f"[red]Cherry-pick gagal: {err}[/red]")
+        log_error("Cherry-pick gagal", raw_detail=err)
+        return
+
+    ok2, commit_id, _e = run_git(["rev-parse", "--short", "HEAD"], cwd=repo)
+    console.print(f"[green]✓ Cherry-pick berhasil.[/green] Commit baru: {commit_id if ok2 else '-'}")
+    log_activity(f"Cherry-pick {commit_hash} dari {sumber} berhasil")
+
+
+def lanjutkan_cherry_pick() -> None:
+    """Lanjutkan cherry-pick yang sempat berhenti karena conflict, setelah
+    file yang bentrok sudah diselesaikan manual dan di-Git Add."""
+    repo = _get_active_repo()
+    if not repo:
+        return
+    ok, out, err = run_git(["cherry-pick", "--continue"], cwd=repo)
+    if not ok:
+        low = err.lower()
+        if "no cherry-pick" in low or "nothing to commit" in low:
+            console.print("[yellow]Tidak ada cherry-pick yang sedang berjalan.[/yellow]")
+            return
+        console.print(f"[red]Gagal melanjutkan cherry-pick: {err}[/red]")
+        log_error("Gagal cherry-pick --continue", raw_detail=err)
+        return
+    console.print(f"[green]✓ Cherry-pick dilanjutkan dan selesai.[/green]\n{out or ''}")
+    log_activity("Cherry-pick dilanjutkan (continue)")
+
+
 def buat_pull_request() -> None:
     """Compare & Pull Request -> Create Pull Request (title bisa diedit),
     setara fitur 'Compare & pull request' di web GitHub."""
@@ -344,7 +461,11 @@ def show_help() -> None:
         "PR dari source branch ke base branch, judul bisa diedit.\n\n"
         "Merge Pull Request: menampilkan daftar PR yang open lalu merge langsung\n"
         "dari sini (Merge commit / Squash / Rebase), opsional hapus branch.\n"
-        "Kedua fitur PR butuh GitHub CLI (gh) terpasang & sudah login.\n"
+        "Kedua fitur PR butuh GitHub CLI (gh) terpasang & sudah login.\n\n"
+        "Cherry-pick Commit: ambil SATU commit tertentu dari branch lain dan\n"
+        "terapkan ke branch aktif, tanpa menggabungkan seluruh branch seperti\n"
+        "Merge Lokal. Kalau conflict, Lanjutkan/Lewati/Batalkan bisa langsung\n"
+        "dari menu ini juga.\n"
     )
     questionary.text("Tekan Enter untuk kembali...").ask()
 
@@ -354,13 +475,25 @@ def menu() -> None:
         console.rule("[bold cyan]Merge")
         choice = questionary.select(
             "Pilih aksi:",
-            choices=["Merge Lokal", "Buat Pull Request (GitHub)", "Merge Pull Request (GitHub)", "? Help", "Kembali"],
+            choices=[
+                "Merge Lokal",
+                "Cherry-pick Commit",
+                "Lanjutkan Cherry-pick (setelah conflict)",
+                "Buat Pull Request (GitHub)",
+                "Merge Pull Request (GitHub)",
+                "? Help",
+                "Kembali",
+            ],
         ).ask()
         if choice is None or choice == "Kembali":
             return
         try:
             if choice == "Merge Lokal":
                 merge_lokal()
+            elif choice == "Cherry-pick Commit":
+                cherry_pick()
+            elif choice == "Lanjutkan Cherry-pick (setelah conflict)":
+                lanjutkan_cherry_pick()
             elif choice == "Buat Pull Request (GitHub)":
                 buat_pull_request()
             elif choice == "Merge Pull Request (GitHub)":

@@ -109,6 +109,35 @@ def _friendly_upstream_error(err: str) -> str:
     return "Terjadi kesalahan saat menghubungkan upstream."
 
 
+def is_rebase_in_progress(repo: str) -> bool:
+    """Cek apakah repository sedang berada di tengah proses rebase yang
+    belum selesai (folder .git/rebase-merge atau .git/rebase-apply ada).
+    Dipakai bareng oleh Dashboard (peringatan) dan menu Rebase (supaya
+    tidak bisa mulai rebase baru kalau rebase lama belum kelar) - satu
+    sumber kebenaran, tidak diduplikasi di masing-masing tempat."""
+    if not repo or not os.path.isdir(repo):
+        return False
+    git_dir = os.path.join(repo, ".git")
+    # .git bisa berupa FILE (worktree/submodule) berisi 'gitdir: <path>',
+    # bukan folder - baca isinya kalau begitu supaya deteksi tetap benar.
+    if os.path.isfile(git_dir):
+        try:
+            with open(git_dir, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+        except OSError:
+            return False
+        if not content.startswith("gitdir:"):
+            return False
+        target = content.split(":", 1)[1].strip()
+        git_dir = target if os.path.isabs(target) else os.path.join(repo, target)
+    if not os.path.isdir(git_dir):
+        return False
+    return (
+        os.path.isdir(os.path.join(git_dir, "rebase-merge"))
+        or os.path.isdir(os.path.join(git_dir, "rebase-apply"))
+    )
+
+
 def preflight(
     repo: Optional[str],
     need_remote: bool = True,

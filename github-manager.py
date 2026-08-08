@@ -31,6 +31,8 @@ from modules import (  # noqa: E402
     push,
     pull,
     merge,
+    stash,
+    rebase,
     backup,
     settings,
     update,
@@ -48,13 +50,15 @@ MAIN_MENU_CHOICES = [
     "6. Push",
     "7. Pull",
     "8. Merge",
-    "9. Backup",
-    "10. Git Status",
-    "11. Belajar Git",
-    "12. Pengaturan",
-    "13. Log Aktivitas",
-    "14. Cek Update",
-    "15. Log Debug",
+    "9. Stash",
+    "10. Rebase",
+    "11. Backup",
+    "12. Git Status",
+    "13. Belajar Git",
+    "14. Pengaturan",
+    "15. Log Aktivitas",
+    "16. Cek Update",
+    "17. Log Debug",
     "0. Keluar",
 ]
 
@@ -136,19 +140,23 @@ def main() -> None:
             elif pilihan.startswith("8."):
                 merge.menu()
             elif pilihan.startswith("9."):
-                backup.menu()
+                stash.menu()
             elif pilihan.startswith("10."):
+                rebase.menu()
+            elif pilihan.startswith("11."):
+                backup.menu()
+            elif pilihan.startswith("12."):
                 gitadd.git_status_lengkap()
                 questionary.text("\nTekan Enter untuk kembali...").ask()
-            elif pilihan.startswith("11."):
-                help_module.menu()
-            elif pilihan.startswith("12."):
-                settings.menu()
             elif pilihan.startswith("13."):
-                show_activity_log()
+                help_module.menu()
             elif pilihan.startswith("14."):
-                update.menu()
+                settings.menu()
             elif pilihan.startswith("15."):
+                show_activity_log()
+            elif pilihan.startswith("16."):
+                update.menu()
+            elif pilihan.startswith("17."):
                 show_debug_log()
         except KeyboardInterrupt:
             console.print("\n[yellow]Dibatalkan oleh pengguna.[/yellow]")
