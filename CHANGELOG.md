@@ -29,6 +29,14 @@
 - Materi baru di menu "Belajar Git": Stash, Rebase, Cherry-pick.
 - `tests/test_stash.py`: unit test untuk parser murni `_parse_stash_entry()`.
 
+### Ditambahkan (lanjutan)
+- **Banner ASCII di akhir `install.sh`, gaya "poster"**: judul "GITHUB"
+  (putih) terpisah dari blok huruf besar "MANAGER" (hijau), tagline,
+  kotak info Version/Author + status "Installation completed", dan
+  command hint `[ $ github-manager ]` - meniru struktur referensi desain
+  yang diberikan user, dalam bentuk ASCII murni (kompatibel semua
+  terminal Termux, tidak butuh font/emoji khusus).
+
 ### Perubahan
 - Nomor menu utama bergeser karena ada 2 menu baru: Backup sekarang
   #11 (dulu #9), Git Status #12 (dulu #10), Belajar Git #13 (dulu

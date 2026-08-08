@@ -6,6 +6,7 @@ GREEN="\033[0;32m"
 YELLOW="\033[1;33m"
 RED="\033[0;31m"
 BLUE="\033[0;34m"
+WHITE="\033[1;37m"
 NC="\033[0m"
 
 echo -e "${BLUE}"
@@ -165,10 +166,26 @@ chmod +x install.sh
 chmod +x github-manager.py
 
 echo
+echo -e "${WHITE}"
+echo "-------------- G I T H U B --------------"
+echo -e "${NC}"
 echo -e "${GREEN}"
-echo "========================================="
-echo " ✓ Install selesai"
-echo "========================================="
+echo "#   #  ###  #   #  ###   #### ##### #### "
+echo "## ## #   # ##  # #   # #     #     #   #"
+echo "# # # ##### # # # ##### #  ## ####  #### "
+echo "#   # #   # #  ## #   # #   # #     # #  "
+echo "#   # #   # #   # #   #  #### ##### #  ##"
+echo
+echo "----- GitHub Repository Manager CLI -----"
+echo
+echo "+-----------------------------------------+"
+echo "| Version : 1.3.0                         |"
+echo "| Author  : catur003                      |"
+echo "|                                         |"
+echo "| [OK] Installation completed             |"
+echo "+-----------------------------------------+"
+echo
+echo "          [ \$ github-manager ]           "
 echo -e "${NC}"
 
 echo "Cara menjalankan:"
