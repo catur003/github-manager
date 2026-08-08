@@ -141,27 +141,36 @@ def preflight(
         return False
     console.print(f"[green]  ✓ Branch[/green] ({branch})")
 
-    if not need_remote:
-        return True
-
-    # 3. Remote
-    if not has_remote(repo):
-        console.print("[red]✗ Remote 'origin' belum diatur.[/red]")
-        console.print("[yellow]Hubungkan repository ini ke GitHub dulu (Clone ulang atau atur remote manual).[/yellow]")
-        return False
-    console.print("[green]  ✓ Remote[/green] (origin)")
-
-    # 4. Internet (ke remote)
-    if not check_internet(repo):
-        console.print("[red]✗ Internet tidak tersedia / tidak bisa menghubungi remote.[/red]")
-        return False
-    console.print("[green]  ✓ Internet[/green]")
-
-    # 5. Upstream
-    if need_upstream:
-        if not ensure_upstream(repo, branch):
+    # 3-5. Remote / Internet / Upstream - hanya relevan kalau operasi ini
+    # memang butuh bicara ke remote (need_remote=True).
+    #
+    # BUGFIX KRITIS: sebelumnya ada `if not need_remote: return True` di
+    # sini, yang bikin operasi dengan need_remote=False (Merge lokal,
+    # semua Upload) langsung keluar dari preflight() SEBELUM sempat sampai
+    # ke langkah 6 (Permission) dan 7 (Working Tree) di bawah. Akibatnya
+    # checkout branch untuk merge, atau overwrite file lewat Upload, bisa
+    # terjadi dengan perubahan belum ter-commit TANPA peringatan apa pun -
+    # padahal justru di titik itu warning paling dibutuhkan. Sekarang,
+    # apapun nilai need_remote, alur selalu diteruskan ke langkah 6 & 7.
+    if need_remote:
+        # 3. Remote
+        if not has_remote(repo):
+            console.print("[red]✗ Remote 'origin' belum diatur.[/red]")
+            console.print("[yellow]Hubungkan repository ini ke GitHub dulu (Clone ulang atau atur remote manual).[/yellow]")
             return False
-        console.print("[green]  ✓ Upstream[/green]")
+        console.print("[green]  ✓ Remote[/green] (origin)")
+
+        # 4. Internet (ke remote)
+        if not check_internet(repo):
+            console.print("[red]✗ Internet tidak tersedia / tidak bisa menghubungi remote.[/red]")
+            return False
+        console.print("[green]  ✓ Internet[/green]")
+
+        # 5. Upstream
+        if need_upstream:
+            if not ensure_upstream(repo, branch):
+                return False
+            console.print("[green]  ✓ Upstream[/green]")
 
     # 6. Permission (folder repo bisa ditulis)
     if not os.access(repo, os.W_OK):

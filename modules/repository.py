@@ -10,7 +10,7 @@ from typing import Optional, Tuple
 import questionary
 from rich.console import Console
 
-from modules.utils import run_git, is_git_repo, find_git_repos, normalize_repo_url, GitError, spinner, redact_secrets
+from modules.utils import run_git, is_git_repo, find_git_repos, normalize_repo_url, spinner, redact_secrets
 from modules.settings import load_config, save_config, get_repositories, add_to_repositories, toggle_favorite, remove_from_repositories
 from modules.logger import log_activity, log_error
 from datetime import datetime
@@ -24,45 +24,6 @@ def _set_active_repository(path: str) -> None:
     save_config(config)
     from modules.settings import add_to_repositories
     add_to_repositories(path)
-
-
-def pilih_repository() -> None:
-    """Pilih repository dari daftar hasil pencarian otomatis di home directory."""
-    home = os.path.expanduser("~")
-    console.print("[cyan]Mencari repository Git di sekitar home directory...[/cyan]")
-    repos = find_git_repos(home)
-    if not repos:
-        console.print("[yellow]Tidak ditemukan repository Git. "
-                       "Gunakan 'Tambah Repository' untuk memasukkan path manual.[/yellow]")
-        return
-    pilihan = questionary.select("Pilih repository:", choices=repos + ["Batal"]).ask()
-    if pilihan and pilihan != "Batal":
-        _set_active_repository(pilihan)
-        console.print(f"[green]Repository aktif diubah ke: {pilihan}[/green]")
-        log_activity(f"Repository dipilih: {pilihan}")
-
-
-def cari_repository_otomatis() -> None:
-    """Cari repository Git otomatis mulai dari path yang diberikan user."""
-    start_path = questionary.text(
-        "Masukkan folder awal pencarian (kosongkan untuk home):", default=""
-    ).ask()
-    if start_path is None:
-        return
-    start_path = start_path.strip() or os.path.expanduser("~")
-    if not os.path.isdir(start_path):
-        console.print("[red]Folder tidak ditemukan.[/red]")
-        return
-    console.print(f"[cyan]Mencari repository di {start_path}...[/cyan]")
-    repos = find_git_repos(start_path)
-    if not repos:
-        console.print("[yellow]Tidak ada repository Git ditemukan di folder tersebut.[/yellow]")
-        return
-    pilihan = questionary.select("Repository ditemukan:", choices=repos + ["Batal"]).ask()
-    if pilihan and pilihan != "Batal":
-        _set_active_repository(pilihan)
-        console.print(f"[green]Repository aktif diubah ke: {pilihan}[/green]")
-        log_activity(f"Repository dipilih (pencarian otomatis): {pilihan}")
 
 
 def _valid_repo_input(raw: str) -> bool:
@@ -149,26 +110,6 @@ def clone_repository() -> None:
     ).ask()
     if jadikan_aktif:
         _set_active_repository(dest_path)
-
-
-def tambah_repository() -> None:
-    """Tambah repository dengan memasukkan path secara manual."""
-    path = questionary.text("Masukkan path folder repository:").ask()
-    if not path:
-        return
-    path = os.path.expanduser(path.strip())
-    if not is_git_repo(path):
-        console.print("[red]Repository tidak ditemukan. Pastikan folder tersebut adalah repository Git "
-                       "(mengandung folder .git).[/red]")
-        return
-    _set_active_repository(path)
-    console.print(f"[green]Repository '{path}' berhasil ditambahkan dan dijadikan aktif.[/green]")
-    log_activity(f"Repository ditambahkan: {path}")
-
-
-def ganti_repository() -> None:
-    """Ganti repository aktif ke path lain."""
-    tambah_repository()
 
 
 def _rev_list_ahead_behind(repo: str, upstream: str) -> Optional[Tuple[int, int]]:
@@ -270,7 +211,6 @@ def compare_repository() -> None:
     3. Working Tree (perubahan file lokal yang belum di-commit) ditampilkan
        terpisah dari status commit, supaya tidak tercampur maknanya.
     """
-    from modules.utils import GitError  # noqa: F401 (dipakai di except di menu())
     from modules import preflight
 
     repo = _get_active_repo_local()
@@ -455,17 +395,6 @@ def _get_active_repo_local() -> str | None:
     return repo
 
 
-def lihat_repository_aktif() -> None:
-    """Tampilkan repository yang sedang aktif."""
-    config = load_config()
-    repo = config.get("active_repository", "")
-    if not repo or not is_git_repo(repo):
-        console.print("[yellow]Belum ada repository aktif. "
-                       "Silakan pilih repository terlebih dahulu.[/yellow]")
-        return
-    console.print(f"[cyan]Repository aktif:[/cyan] {repo}")
-
-
 def _human_git_error(stderr: str) -> str:
     """Ubah pesan error git mentah menjadi pesan ramah pengguna."""
     stderr_lower = stderr.lower()
@@ -480,20 +409,27 @@ def _human_git_error(stderr: str) -> str:
     return stderr or "Terjadi kesalahan yang tidak diketahui."
 
 
-def show_help() -> None:
-    console.print(
-        "\n[bold cyan]Bantuan - Repository[/bold cyan]\n"
-        "- Pilih Repository: memilih repository dari hasil pencarian otomatis.\n"
-        "- Cari Repository Otomatis: mencari folder Git mulai dari path tertentu.\n"
-        "- Clone Repository: mengunduh repository baru dari URL remote.\n"
-        "- Compare Repository: membandingkan repository lokal dengan GitHub\n"
-        "  (Sinkron / Lokal Lebih Baru / GitHub Lebih Baru / Diverged),\n"
-        "  lalu tawarkan aksi yang relevan (Push, Pull, atau Fetch+Review).\n"
-        "- Tambah Repository: menambahkan repository dengan path manual.\n"
-        "- Ganti Repository: mengganti repository aktif.\n"
-        "- Lihat Repository Aktif: menampilkan repository yang sedang dipakai.\n"
-    )
-    questionary.text("Tekan Enter untuk kembali...").ask()
+def tambah_repository_manual() -> None:
+    """
+    Tambah repository dengan memasukkan path secara manual.
+    BUGFIX: fungsi ini sebelumnya cuma ada di menu() lama yang dead code
+    (tidak pernah dipanggil dari github-manager.py) - Repository Manager
+    yang aktif dipakai sebelumnya cuma punya Scan (auto-discover di HOME)
+    dan Clone, jadi repo yang lokasinya di luar jangkauan scan tidak
+    mungkin ditambahkan. Sekarang ditautkan ke Repository Manager yang
+    aktif supaya kemampuan ini kembali bisa dipakai.
+    """
+    path = questionary.text("Masukkan path folder repository:").ask()
+    if not path:
+        return
+    path = os.path.expanduser(path.strip())
+    if not is_git_repo(path):
+        console.print("[red]Repository tidak ditemukan. Pastikan folder tersebut adalah repository Git "
+                       "(mengandung folder .git).[/red]")
+        return
+    _set_active_repository(path)
+    console.print(f"[green]Repository '{path}' berhasil ditambahkan dan dijadikan aktif.[/green]")
+    log_activity(f"Repository ditambahkan (manual): {path}")
 
 
 def repository_manager() -> None:
@@ -502,14 +438,16 @@ def repository_manager() -> None:
         console.rule("[bold cyan]Repository Manager")
         repos = get_repositories()  # from settings
         if not repos:
-            console.print("[yellow]Belum ada repository tersimpan. Gunakan scan atau clone.[/yellow]")
+            console.print("[yellow]Belum ada repository tersimpan. Gunakan scan, clone, atau tambah manual.[/yellow]")
             choice = questionary.select(
-                "Pilih aksi:", choices=["Scan Repositories", "Clone Repository", "Kembali"]
+                "Pilih aksi:", choices=["Scan Repositories", "Clone Repository", "Tambah Manual", "Kembali"]
             ).ask()
             if choice == "Scan Repositories":
                 scan_repositories()
             elif choice == "Clone Repository":
                 clone_repository()
+            elif choice == "Tambah Manual":
+                tambah_repository_manual()
             elif choice == "Kembali":
                 return
             continue
@@ -537,7 +475,7 @@ def repository_manager() -> None:
             mark = "⭐ " if r.get("favorite", False) else ""
             active_mark = " ✓" if path == active_repo else ""
             choices.append(f"{mark}{name} ({branch}, {status}) - {last_open}{active_mark} | {path}")
-        choices += ["Scan Repositories", "Clone Repository", "Compare Repository", "Refresh", "? Search", "Favorite", "Kembali"]
+        choices += ["Scan Repositories", "Clone Repository", "Tambah Manual", "Compare Repository", "Refresh", "? Search", "Favorite", "Kembali"]
 
         pilihan = questionary.select("Pilih repository atau aksi:", choices=choices).ask()
         if not pilihan or pilihan == "Kembali":
@@ -547,6 +485,9 @@ def repository_manager() -> None:
             continue
         if pilihan == "Clone Repository":
             clone_repository()
+            continue
+        if pilihan == "Tambah Manual":
+            tambah_repository_manual()
             continue
         if pilihan == "Compare Repository":
             compare_repository()
@@ -686,46 +627,4 @@ def open_location(path: str) -> None:
         console.print(f"[cyan]termux-open tidak tersedia. Lokasi repository: {path}[/cyan]")
 
 
-def menu() -> None:
-    while True:
-        console.rule("[bold cyan]Repository")
-        choice = questionary.select(
-            "Pilih aksi:",
-            choices=[
-                "Pilih Repository",
-                "Cari Repository Git Otomatis",
-                "Clone Repository",
-                "Compare Repository",
-                "Tambah Repository",
-                "Ganti Repository",
-                "Lihat Repository Aktif",
-                "? Help",
-                "Kembali",
-            ],
-        ).ask()
 
-        if choice is None or choice == "Kembali":
-            return
-        try:
-            if choice == "Pilih Repository":
-                pilih_repository()
-            elif choice == "Cari Repository Git Otomatis":
-                cari_repository_otomatis()
-            elif choice == "Clone Repository":
-                clone_repository()
-            elif choice == "Compare Repository":
-                compare_repository()
-            elif choice == "Tambah Repository":
-                tambah_repository()
-            elif choice == "Ganti Repository":
-                ganti_repository()
-            elif choice == "Lihat Repository Aktif":
-                lihat_repository_aktif()
-            elif choice == "? Help":
-                show_help()
-        except GitError as e:
-            console.print(f"[red]{e.human_message}[/red]")
-            log_error("GitError di menu Repository", raw_detail=e.raw_error)
-        except Exception as e:  # noqa: BLE001
-            console.print("[red]Terjadi kesalahan tak terduga. Detail sudah dicatat ke log.[/red]")
-            log_error("Exception di menu Repository", e)

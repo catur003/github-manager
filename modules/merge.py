@@ -101,8 +101,10 @@ def merge_lokal() -> None:
     if not repo:
         return
     # Merge lokal gak butuh remote/internet, tapi tetap cek repo valid +
-    # working tree (warning kalau ada perubahan belum di-commit).
-    if not preflight.preflight(repo, need_remote=False, label="Merge"):
+    # working tree (warning kalau ada perubahan belum di-commit). need_clean
+    # dipasang True karena checkout ke target branch di bawah bisa gagal
+    # atau menimpa perubahan lokal kalau working tree kotor.
+    if not preflight.preflight(repo, need_remote=False, need_clean=True, label="Merge"):
         return
     branches = _list_branches(repo)
     if len(branches) < 2:

@@ -15,7 +15,7 @@ import questionary
 from rich.console import Console
 from rich.table import Table
 
-from modules.utils import CONFIG_FILE, ensure_dirs, run_git, spinner
+from modules.utils import CONFIG_FILE, ensure_dirs, run_git, spinner, is_git_repo, redact_secrets
 from modules.logger import log_activity, log_error
 
 console = Console()
@@ -141,7 +141,7 @@ def show_settings_table(config: Dict[str, Any]) -> None:
     table.add_column("Nilai")
     table.add_row("Nama Git", config.get("git_name") or "-")
     table.add_row("Email Git", config.get("git_email") or "-")
-    table.add_row("Remote Origin", config.get("remote_origin") or "-")
+    table.add_row("Remote Origin (repo aktif)", config.get("remote_origin") or "-")
     table.add_row("Default Repository", config.get("default_repository") or "-")
     table.add_row("Backup Otomatis", "ON" if config.get("backup_otomatis") else "OFF")
     table.add_row("Konfirmasi Sebelum Delete", "ON" if config.get("konfirmasi_delete") else "OFF")
@@ -201,11 +201,41 @@ def menu() -> None:
                 log_activity(f"Email Git diubah menjadi {val}")
 
         elif choice == "Remote Origin":
-            val = questionary.text("Masukkan URL remote origin:", default=config.get("remote_origin", "")).ask()
-            if val is not None:
-                config["remote_origin"] = val
-                save_config(config)
-                log_activity("Remote origin diubah di pengaturan")
+            # BUGFIX TINGGI: sebelumnya field ini cuma nyimpen string ke
+            # config aplikasi sendiri - TIDAK PERNAH dipakai untuk
+            # `git remote set-url` pada repo manapun, jadi user yang isi
+            # field ini bakal ngira remote-nya udah berubah padahal gak
+            # ada efek apa pun. Sekarang beneran diterapkan ke repository
+            # yang sedang aktif.
+            active_repo = config.get("active_repository", "")
+            if not active_repo or not is_git_repo(active_repo):
+                console.print(
+                    "[yellow]Belum ada repository aktif. Pilih repository dulu lewat menu "
+                    "'Repository' sebelum mengubah Remote Origin.[/yellow]"
+                )
+            else:
+                ok_cur, current_url, _e = run_git(["remote", "get-url", "origin"], cwd=active_repo)
+                default_val = current_url.strip() if ok_cur else config.get("remote_origin", "")
+                val = questionary.text(
+                    f"Masukkan URL remote origin baru untuk '{os.path.basename(active_repo)}':",
+                    default=default_val,
+                ).ask()
+                if val:
+                    if ok_cur:
+                        ok, _out, err = run_git(["remote", "set-url", "origin", val], cwd=active_repo)
+                    else:
+                        ok, _out, err = run_git(["remote", "add", "origin", val], cwd=active_repo)
+                    if ok:
+                        config["remote_origin"] = val
+                        save_config(config)
+                        console.print(
+                            f"[green]✓ Remote origin repository '{os.path.basename(active_repo)}' "
+                            f"diubah ke: {val}[/green]"
+                        )
+                        log_activity(redact_secrets(f"Remote origin diubah ke {val} untuk repo {active_repo}"))
+                    else:
+                        console.print(f"[red]Gagal mengubah remote origin: {err}[/red]")
+                        log_error("Gagal mengubah remote origin", raw_detail=err)
 
         elif choice == "Default Repository":
             val = questionary.text("Masukkan path default repository:",
@@ -299,17 +329,44 @@ def github_account_menu() -> None:
             console.print("Branch Aktif: -")
 
         if not cred_helper:
-            aktifkan = questionary.confirm(
-                "Credential helper belum aktif. Aktifkan sekarang agar login tidak perlu diulang terus?",
-                default=False,
+            # BUGFIX SEDANG: sebelumnya cuma nawarin mode 'store' (plaintext
+            # permanen di ~/.git-credentials) tanpa penjelasan implikasinya,
+            # dan tanpa alternatif 'cache' (sementara, lebih aman). Sekarang
+            # user pilih eksplisit & dikasih tahu risikonya sebelum memilih
+            # 'store'.
+            console.print(
+                "[dim]Credential helper menyimpan token GitHub supaya kamu tidak perlu "
+                "login ulang tiap push/pull.[/dim]"
+            )
+            pilihan_helper = questionary.select(
+                "Aktifkan credential helper?",
+                choices=[
+                    "Cache sementara (disarankan - tersimpan di memori ±15 menit)",
+                    "Simpan permanen (praktis, tapi token tersimpan PLAINTEXT di ~/.git-credentials)",
+                    "Lewati",
+                ],
             ).ask()
-            if aktifkan:
-                ok, _out, err = run_git(["config", "--global", "credential.helper", "store"])
+            if pilihan_helper and pilihan_helper.startswith("Cache"):
+                ok, _out, err = run_git(["config", "--global", "credential.helper", "cache --timeout=900"])
                 if ok:
-                    console.print("[green]Credential helper diaktifkan.[/green]")
-                    log_activity("Credential helper diaktifkan")
+                    console.print("[green]Credential helper (cache 15 menit) diaktifkan.[/green]")
+                    log_activity("Credential helper diaktifkan (cache)")
                 else:
                     console.print(f"[red]Gagal mengaktifkan credential helper: {err}[/red]")
+            elif pilihan_helper and pilihan_helper.startswith("Simpan permanen"):
+                konfirmasi = questionary.confirm(
+                    "⚠ Token GitHub (Personal Access Token) akan tersimpan sebagai TEKS BIASA "
+                    "(plaintext) di file ~/.git-credentials, bisa dibaca siapa pun yang punya akses "
+                    "ke penyimpanan HP ini. Tetap lanjutkan?",
+                    default=False,
+                ).ask()
+                if konfirmasi:
+                    ok, _out, err = run_git(["config", "--global", "credential.helper", "store"])
+                    if ok:
+                        console.print("[green]Credential helper (simpan permanen) diaktifkan.[/green]")
+                        log_activity("Credential helper diaktifkan (store, plaintext)")
+                    else:
+                        console.print(f"[red]Gagal mengaktifkan credential helper: {err}[/red]")
 
         choice = questionary.select(
             "Aksi:", choices=["Login", "Logout", "Ganti Akun", "Test Login", "Refresh dari GitHub", "Kembali"]

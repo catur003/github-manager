@@ -81,6 +81,28 @@ def riwayat_commit() -> None:
     console.print(table)
 
 
+def _commit_terakhir_sudah_dipush(repo: str) -> bool:
+    """Cek kasar apakah HEAD saat ini sama persis dengan upstream
+    (origin/<branch>) - kalau iya, commit terakhir kemungkinan besar sudah
+    pernah di-push. Dipakai buat memberi peringatan sebelum Amend, karena
+    amend pada commit yang sudah di-push akan rewrite history secara diam-
+    diam (beda perlakuan dengan Force Push yang sudah dikasih warning +
+    konfirmasi ketik 'YA' eksplisit)."""
+    ok_b, branch, _e = run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo)
+    if not ok_b or not branch:
+        return False
+    ok_u, upstream, _e2 = run_git(
+        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", f"{branch}@{{u}}"], cwd=repo
+    )
+    if not ok_u or not upstream:
+        return False  # belum ada upstream -> belum pernah di-push
+    ok_h, head_sha, _e3 = run_git(["rev-parse", "HEAD"], cwd=repo)
+    ok_r, remote_sha, _e4 = run_git(["rev-parse", upstream], cwd=repo)
+    if not ok_h or not ok_r:
+        return False
+    return head_sha.strip() == remote_sha.strip()
+
+
 def amend_commit() -> None:
     """Ubah (amend) commit terakhir dengan perubahan/pesan baru."""
     repo = _get_active_repo()
@@ -90,6 +112,22 @@ def amend_commit() -> None:
     if not ok:
         console.print("[yellow]Belum ada commit untuk di-amend.[/yellow]")
         return
+
+    # BUGFIX TINGGI: sebelumnya tidak ada peringatan sama sekali sebelum
+    # amend, padahal amend pada commit yang sudah di-push akan rewrite
+    # history diam-diam - user pemula bisa gak sadar konsekuensinya sampai
+    # push berikutnya perlu force.
+    if _commit_terakhir_sudah_dipush(repo):
+        console.print(
+            "[yellow]⚠ Commit terakhir ini sepertinya sudah pernah di-push ke remote.[/yellow]\n"
+            "Amend akan mengubah riwayat commit (history rewrite) - kamu perlu Force Push "
+            "setelah ini, dan bisa mengganggu orang lain yang sudah pull versi lama."
+        )
+        lanjut = questionary.confirm("Tetap lanjutkan amend?", default=False).ask()
+        if not lanjut:
+            console.print("[yellow]Dibatalkan.[/yellow]")
+            return
+
     console.print(f"[dim]Pesan commit terakhir: {last}[/dim]")
     pesan_baru = questionary.text("Masukkan pesan commit baru (kosongkan untuk pakai pesan lama):").ask()
     args = ["commit", "--amend"]

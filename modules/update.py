@@ -16,7 +16,7 @@ import zipfile
 import questionary
 from rich.console import Console
 
-from modules.utils import APP_VERSION, GITHUB_REPO, BASE_DIR
+from modules.utils import APP_VERSION, GITHUB_REPO, BASE_DIR, safe_zip_member_path
 from modules.logger import log_activity, log_error
 
 console = Console()
@@ -99,7 +99,32 @@ def check_update(silent: bool = False) -> None:
     _do_update(zip_url, latest_tag)
 
 
+_ALLOWED_UPDATE_HOSTS = {"codeload.github.com", "github.com", "api.github.com"}
+
+
+def _is_safe_update_url(url: str) -> bool:
+    """
+    SECURITY: sebelum download & eksekusi ulang source code aplikasi,
+    pastikan URL-nya HTTPS dan mengarah ke domain GitHub resmi - bukan
+    cuma percaya apa adanya isi field 'zipball_url' dari respons API
+    (defense-in-depth kalau suatu saat respons API bisa dimanipulasi,
+    mis. lewat proxy MITM pada koneksi yang tidak aman).
+    """
+    import urllib.parse
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except ValueError:
+        return False
+    return parsed.scheme == "https" and parsed.hostname in _ALLOWED_UPDATE_HOSTS
+
+
 def _do_update(zip_url: str, latest_tag: str) -> None:
+    # SECURITY: validasi URL sebelum request apa pun dikirim.
+    if not _is_safe_update_url(zip_url):
+        console.print("[red]URL update mencurigakan (bukan HTTPS/domain GitHub resmi). Update dibatalkan.[/red]")
+        log_error("URL update ditolak (gagal validasi domain/HTTPS)", raw_detail=zip_url)
+        return
+
     with tempfile.TemporaryDirectory() as tmp:
         zip_path = os.path.join(tmp, "update.zip")
         try:
@@ -113,9 +138,31 @@ def _do_update(zip_url: str, latest_tag: str) -> None:
             return
 
         extract_dir = os.path.join(tmp, "extracted")
+        os.makedirs(extract_dir, exist_ok=True)
         try:
+            # SECURITY - Zip Slip protection: sebelumnya pakai z.extractall()
+            # langsung tanpa validasi path, beda dari upload.py/backup.py yang
+            # sudah konsisten memvalidasi tiap entry lewat safe_zip_member_path().
+            # Titik ini justru paling sensitif karena hasil ekstraknya langsung
+            # dieksekusi ulang sebagai source code aplikasi, jadi wajib disamakan
+            # (atau lebih ketat) dibanding modul lain.
             with zipfile.ZipFile(zip_path, "r") as z:
-                z.extractall(extract_dir)
+                skipped = 0
+                for member in z.infolist():
+                    if member.is_dir():
+                        continue
+                    target_path = safe_zip_member_path(extract_dir, member.filename)
+                    if target_path is None:
+                        skipped += 1
+                        log_error("Zip Slip diblokir saat update", raw_detail=f"entry ditolak: {member.filename}")
+                        continue
+                    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                    with z.open(member) as src, open(target_path, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                if skipped:
+                    console.print(
+                        f"[red]⚠ {skipped} entry mencurigakan di file update dilewati (tidak diekstrak).[/red]"
+                    )
         except zipfile.BadZipFile as e:
             console.print("[red]File update rusak/tidak valid.[/red]")
             log_error("ZIP update rusak", e)

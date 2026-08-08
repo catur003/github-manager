@@ -192,7 +192,13 @@ def sync_branch() -> None:
         return
 
     with spinner("Fetch dari GitHub (sinkronisasi daftar branch)..."):
-        run_git(["fetch", "--prune", "origin"], cwd=repo, timeout=60)
+        ok_fetch, _out_fetch, err_fetch = run_git(["fetch", "--prune", "origin"], cwd=repo, timeout=60)
+    if not ok_fetch:
+        # BUGFIX SEDANG: sebelumnya kegagalan fetch di sini didiamkan total -
+        # daftar branch remote yang ditampilkan jadi data lama (stale) tanpa
+        # user tahu ada masalah koneksi.
+        console.print(f"[yellow]⚠ Gagal fetch dari remote: {_friendly(err_fetch)}[/yellow]")
+        console.print("[yellow]Daftar branch remote di bawah mungkin tidak up-to-date.[/yellow]")
 
     local = _list_branches(repo)
     remote = _list_remote_branches(repo)
@@ -277,6 +283,20 @@ def sync_branch() -> None:
     elif aksi == "Hapus Branch Remote":
         if not remote:
             console.print("[yellow]Tidak ada branch di remote.[/yellow]")
+            return
+        # BUGFIX SEDANG: sebelumnya langsung `git push --delete` tanpa cek
+        # remote/internet dulu (beda dengan modul Push/Pull yang sudah
+        # preflight) - kalau gagal karena koneksi, error yang tampil kurang
+        # informatif. Sekarang dicek dulu, konsisten dengan modul lain.
+        from modules import preflight
+        if not preflight.has_remote(repo):
+            console.print("[red]✗ Remote 'origin' belum diatur.[/red]")
+            return
+        if not preflight.check_internet(repo):
+            console.print(
+                "[red]✗ Internet tidak tersedia / tidak bisa menghubungi remote. "
+                "Periksa koneksi kamu sebelum menghapus branch remote.[/red]"
+            )
             return
         target = questionary.select("Pilih branch remote untuk dihapus:", choices=remote + ["Batal"]).ask()
         if not target or target == "Batal":

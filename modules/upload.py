@@ -30,6 +30,56 @@ from modules import preflight
 
 console = Console()
 
+# BUGFIX TINGGI: sebelumnya SKIP_DIRS di utils.py cuma dipakai saat scan
+# repo (find_git_repos), sama sekali tidak dipakai di jalur Upload manapun -
+# jadi node_modules/, .env, dist/, dan folder besar/sensitif lainnya bisa
+# ikut terupload ke repo tanpa disadari. Daftar ini jadi jaring pengaman
+# BAWAAN (selalu aktif), digabung (union) dengan isi .gitignore repo
+# tujuan kalau ada (lihat _read_gitignore_patterns / _should_exclude_upload_entry).
+_DEFAULT_EXCLUDE_NAMES = {
+    "node_modules", ".env", "dist", ".next", "venv", ".venv",
+    "__pycache__", ".git", "build", ".cache", ".dart_tool", ".gradle",
+    ".idea", ".vscode", "vendor", "target",
+}
+
+
+def _read_gitignore_patterns(repo: str) -> list[str]:
+    """Baca .gitignore di root repo (kalau ada). Parsing sederhana: baris
+    kosong & komentar (#) diabaikan. Ini BUKAN implementasi gitignore
+    lengkap - cukup dipakai sebagai lapis kedua saat Upload, bukan
+    pengganti .gitignore asli project."""
+    path = os.path.join(repo, ".gitignore")
+    patterns: list[str] = []
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or line.startswith("!"):
+                    continue
+                patterns.append(line.rstrip("/"))
+    except OSError:
+        pass
+    return patterns
+
+
+def _should_exclude_upload_entry(rel_path: str, gitignore_patterns: list[str]) -> bool:
+    """True kalau rel_path (dipisah '/') harus DILEWATI saat upload -
+    cocok dengan salah satu nama folder/file bawaan (_DEFAULT_EXCLUDE_NAMES)
+    ATAU cocok pola di .gitignore repo tujuan."""
+    import fnmatch
+    parts = rel_path.split("/")
+    if any(p in _DEFAULT_EXCLUDE_NAMES for p in parts):
+        return True
+    for pattern in gitignore_patterns:
+        if not pattern:
+            continue
+        if "/" in pattern:
+            if fnmatch.fnmatch(rel_path, pattern) or fnmatch.fnmatch(rel_path, pattern + "/*"):
+                return True
+        elif any(fnmatch.fnmatch(part, pattern) for part in parts):
+            return True
+    return False
+
 
 def _get_active_repo() -> Optional[str]:
     config = load_config()
@@ -200,6 +250,22 @@ def _detect_zip_root(zip_path: str) -> str:
     """
     markers = ['package.json', 'requirements.txt', 'README.md', 'github-manager.py', 'main.py']
 
+    # BUGFIX: nama folder umum yang lazim jadi folder TOP-LEVEL project asli
+    # (bukan folder wrapper ZIP buangan) - mis. Next.js App Router pakai
+    # struktur app/siswa/route.js. Sebelumnya, kalau suatu level di ZIP cuma
+    # berisi satu folder tunggal tanpa file penyeimbang, folder itu SELALU
+    # dianggap wrapper dan ikut dihapus/turun terus - jadi "app/siswa/
+    # route.js" salah dianggap 2 level wrapper ("app/siswa/"), padahal
+    # keduanya bagian sah dari struktur project. Begitu folder di level itu
+    # cocok salah satu nama ini, chain wrapper dihentikan DI level itu -
+    # folder ini & isinya dianggap root project apa adanya, tidak diturunkan
+    # lagi sebagai wrapper.
+    _COMMON_PROJECT_DIRS = {
+        'app', 'src', 'pages', 'components', 'lib', 'public', 'api',
+        'styles', 'assets', 'tests', 'test', '__tests__', 'docs',
+        'config', 'scripts', 'server', 'client', 'modules',
+    }
+
     with zipfile.ZipFile(zip_path, "r") as z:
         namelist = z.namelist()
 
@@ -246,9 +312,13 @@ def _detect_zip_root(zip_path: str) -> str:
                 return f"AMBIGU:{prefix}"
             return prefix
 
-        # Cuma ada 1 folder tunggal & tidak ada file di level ini -> ini wrapper,
-        # turun satu level lagi (mendukung wrapper berantai/nested).
+        # Cuma ada 1 folder tunggal & tidak ada file di level ini. Ini BISA
+        # wrapper (turun satu level lagi), TAPI kalau nama foldernya cocok
+        # nama folder project umum (app/, src/, dst), jangan dianggap
+        # wrapper - berhenti di sini supaya folder itu tidak ikut kestrip.
         only_dir = next(iter(dirs))
+        if only_dir.lower() in _COMMON_PROJECT_DIRS:
+            return prefix
         prefix = prefix + only_dir + "/"
 
 
@@ -396,13 +466,18 @@ def _zip_target_rel(member_name: str, root_prefix: str) -> Optional[str]:
     return None
 
 
-def _compute_zip_diff(zip_path: str, dest_dir: str, root_prefix: str) -> Tuple[int, int, int, int, dict]:
+def _compute_zip_diff(zip_path: str, dest_dir: str, root_prefix: str,
+                       gitignore_patterns: Optional[list] = None) -> Tuple[int, int, int, int, int, dict]:
     """
     Hitung berapa file akan Tambah / Update / Sama / Delete kalau ZIP ini
     diekstrak ke dest_dir. Hanya memproses file yang berada di dalam root_prefix.
+    Entry yang cocok filter default/.gitignore (lihat _should_exclude_upload_entry)
+    dilewati dan dihitung terpisah sebagai 'dilewati' (excluded), bukan
+    ditambahkan ke target_map.
     """
-    tambah = update = sama = 0
+    tambah = update = sama = dilewati = 0
     target_map: dict = {}
+    patterns = gitignore_patterns or []
 
     with zipfile.ZipFile(zip_path, "r") as z:
         for member in z.infolist():
@@ -410,6 +485,10 @@ def _compute_zip_diff(zip_path: str, dest_dir: str, root_prefix: str) -> Tuple[i
                 continue
             rel = _zip_target_rel(member.filename, root_prefix)
             if not rel:
+                continue
+
+            if _should_exclude_upload_entry(rel, patterns):
+                dilewati += 1
                 continue
 
             # SECURITY: Zip Slip protection - tolak entry yang path-nya
@@ -442,11 +521,12 @@ def _compute_zip_diff(zip_path: str, dest_dir: str, root_prefix: str) -> Tuple[i
                 if full not in target_map:
                     delete += 1
 
-    return tambah, update, sama, delete, target_map
+    return tambah, update, sama, delete, dilewati, target_map
 
 
 def _confirm_zip_changes(repo: str, branch: str, total_entries: int, root_prefix: str,
-                          tambah: int, update: int, sama: int, delete: int) -> bool:
+                          tambah: int, update: int, sama: int, delete: int,
+                          dilewati: int = 0, gitignore_found: bool = False) -> bool:
     console.print(f"\n[bold]Repository[/bold] : {os.path.basename(repo)}")
     console.print(f"[bold]Branch[/bold]     : {branch}\n")
 
@@ -457,6 +537,20 @@ def _confirm_zip_changes(repo: str, branch: str, total_entries: int, root_prefix
         console.print(f"Root Project           : {root_prefix} [yellow](wrapper akan dihapus)[/yellow]")
     else:
         console.print("Root Project           : (Langsung dari root ZIP)")
+
+    # BUGFIX TINGGI: notice filter node_modules/.env/dst sebelum konfirmasi,
+    # supaya user tahu ada file yang otomatis dilewati (bukan cuma diam-diam).
+    if gitignore_found:
+        console.print(
+            f"\n[green]✓ .gitignore terdeteksi[/green] - {dilewati} file cocok pola .gitignore/aturan "
+            f"bawaan (node_modules, .env, dst) dilewati otomatis."
+        )
+    else:
+        console.print(
+            f"\n[yellow]⚠ .gitignore tidak terdeteksi[/yellow] - {dilewati} file dilewati otomatis "
+            f"lewat aturan bawaan (node_modules, .env, dist, dst). Disarankan buat .gitignore "
+            f"di repository ini."
+        )
 
     console.print("\n[bold cyan]Analisis Perubahan[/bold cyan]")
     console.print("──────────────────")
@@ -476,7 +570,7 @@ def upload_zip_extract() -> None:
     repo = _get_active_repo()
     if not repo:
         return
-    if not preflight.preflight(repo, need_remote=False, label="Upload ZIP"):
+    if not preflight.preflight(repo, need_remote=False, need_clean=True, label="Upload ZIP"):
         return
 
     zip_path = _pick_source_file("file ZIP", want_ext=".zip")
@@ -551,15 +645,25 @@ def upload_zip_extract() -> None:
     if dest_dir is None:
         return
 
+    # BUGFIX TINGGI: baca .gitignore repo (kalau ada) sebagai filter tambahan,
+    # digabung dengan daftar exclude bawaan (node_modules, .env, dst) -
+    # sebelumnya tidak ada filter apa pun di jalur Upload, jadi folder besar/
+    # sensitif bisa ikut terupload tanpa sadar.
+    gitignore_patterns = _read_gitignore_patterns(repo)
+    gitignore_found = os.path.isfile(os.path.join(repo, ".gitignore"))
+
     # Menghitung diff dengan root yang sudah pasti
     with spinner("Menghitung perubahan..."):
-        tambah, update, sama, delete, target_map = _compute_zip_diff(zip_path, dest_dir, root_prefix)
+        tambah, update, sama, delete, dilewati, target_map = _compute_zip_diff(
+            zip_path, dest_dir, root_prefix, gitignore_patterns
+        )
         total_entries = len(target_map) # Hanya hitung file yang valid diekstrak
 
     ok_b, branch_now, _e = run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo)
     branch_now = branch_now if ok_b else "-"
 
-    if not _confirm_zip_changes(repo, branch_now, total_entries, root_prefix, tambah, update, sama, delete):
+    if not _confirm_zip_changes(repo, branch_now, total_entries, root_prefix, tambah, update, sama, delete,
+                                 dilewati=dilewati, gitignore_found=gitignore_found):
         console.print("[yellow]Dibatalkan.[/yellow]")
         return
 
@@ -588,6 +692,12 @@ def upload_zip_extract() -> None:
                     
                     rel = _zip_target_rel(member.filename, root_prefix)
                     if not rel:
+                        continue
+
+                    # Filter node_modules/.env/dst + pola .gitignore -
+                    # konsisten dengan _compute_zip_diff() di atas supaya
+                    # angka preview cocok dengan yang benar-benar ditulis.
+                    if _should_exclude_upload_entry(rel, gitignore_patterns):
                         continue
 
                     # SECURITY: Zip Slip protection - entry yang mencoba
@@ -628,7 +738,7 @@ def upload_zip_no_extract() -> None:
     repo = _get_active_repo()
     if not repo:
         return
-    if not preflight.preflight(repo, need_remote=False, label="Upload ZIP (No Extract)"):
+    if not preflight.preflight(repo, need_remote=False, need_clean=True, label="Upload ZIP (No Extract)"):
         return
 
     zip_path = _pick_source_file("file ZIP", want_ext=".zip")
@@ -664,7 +774,7 @@ def upload_file() -> None:
     repo = _get_active_repo()
     if not repo:
         return
-    if not preflight.preflight(repo, need_remote=False, label="Upload File"):
+    if not preflight.preflight(repo, need_remote=False, need_clean=True, label="Upload File"):
         return
 
     path = _pick_source_file("file")
@@ -696,7 +806,7 @@ def upload_folder() -> None:
     repo = _get_active_repo()
     if not repo:
         return
-    if not preflight.preflight(repo, need_remote=False, label="Upload Folder"):
+    if not preflight.preflight(repo, need_remote=False, need_clean=True, label="Upload Folder"):
         return
 
     path = _pick_source_folder("folder")
@@ -709,8 +819,37 @@ def upload_folder() -> None:
 
     nama_folder = os.path.basename(path.rstrip("/"))
     tujuan_path = os.path.join(dest_parent, nama_folder)
+
+    # BUGFIX SEDANG: sebelumnya copytree(..., dirs_exist_ok=True) langsung
+    # jalan tanpa konfirmasi eksplisit kalau folder tujuan sudah berisi -
+    # beda perlakuan dengan Upload ZIP yang selalu tanya "Timpa?" dulu.
+    # File lama di folder tujuan bisa ketimpa diam-diam tanpa opsi batal.
+    if os.path.isdir(tujuan_path) and os.listdir(tujuan_path):
+        timpa = questionary.confirm(
+            f"Folder tujuan '{tujuan_path}' sudah berisi file. File yang namanya sama akan "
+            f"DITIMPA (file lain yang tidak ada di sumber TIDAK ikut dihapus). Lanjutkan?",
+            default=False,
+        ).ask()
+        if not timpa:
+            console.print("[yellow]Dibatalkan.[/yellow]")
+            return
+
+    # Filter node_modules/.env/dst + pola .gitignore repo, sama seperti
+    # Upload ZIP - sebelumnya tidak ada filter apa pun di jalur ini.
+    gitignore_patterns = _read_gitignore_patterns(repo)
+
+    def _ignore(current_dir: str, names: list) -> set:
+        rel_base = os.path.relpath(current_dir, path)
+        skip = set()
+        for name in names:
+            rel = name if rel_base in ("", ".") else f"{rel_base}/{name}"
+            rel = rel.replace(os.sep, "/")
+            if _should_exclude_upload_entry(rel, gitignore_patterns):
+                skip.add(name)
+        return skip
+
     try:
-        shutil.copytree(path, tujuan_path, dirs_exist_ok=True)
+        shutil.copytree(path, tujuan_path, dirs_exist_ok=True, ignore=_ignore)
     except OSError as e:
         console.print(f"[red]Gagal meng-copy folder: {e}[/red]")
         log_error("Gagal upload folder", e)
