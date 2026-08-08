@@ -24,32 +24,9 @@ perintah Git. Dibuat khusus agar nyaman dipakai di **Termux Android**
 
 ## Cara Install
 
-### Opsi A: Lewat pip (`pip install`)
+### Lewat npm (`npm install -g github-cli-manager`)
 
 ```bash
-pip install github-manager
-```
-
-Ini beda mekanisme sama npm - pip **gak punya konsep "postinstall hook"**
-resmi sama sekali. Yang terjadi:
-- pip/setuptools bikinin script kecil bernama `github-manager` di folder
-  `bin` environment Python kamu (venv atau `~/.local/bin`), isinya
-  langsung `from modules.cli import main` - bukan lewat installer/shell
-  script tambahan, jadi gak ada "kebaca apa enggak" karena memang gak ada
-  hook yang dipanggil.
-- Gak ada script lain yang otomatis jalan pas instalasi. Banner ASCII-nya
-  (lihat bagian "Splash Banner" di bawah) tetap tampil - tapi itu bukan
-  dari proses install, melainkan otomatis muncul pas kamu **pertama kali
-  menjalankan** command `github-manager`.
-
-Python 3.9+ tetap harus sudah terpasang duluan (`pkg install python` di
-Termux / sudah bawaan di kebanyakan distro Linux); `pip install` gak bisa
-masangin Python itu sendiri.
-
-### Opsi B: Lewat npm (`npm install -g`)
-
-```bash
-npm install -g github-manager
 ```
 
 Ini bakal:
