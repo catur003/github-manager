@@ -1,5 +1,76 @@
 # Changelog GitHub Manager
 
+## v1.5.0 (Fitur: Lihat Diff, Git Status per-file, Bugfix parsing)
+
+### Ditambahkan
+- **Lihat Diff (menu Git Add)** - fitur baru, belum pernah ada sebelumnya.
+  Nunjukin isi perubahan per baris dengan warna jelas: hijau = ditambah,
+  merah = dihapus, cyan = header hunk (`@@...@@`). Bisa pilih diff dari
+  working tree (belum di-stage) atau staging area (sudah di-stage), per
+  file atau semua sekaligus. Semua baris di-`escape()` sebelum di-print
+  lewat `rich` - isi kode asli sering mengandung karakter `[` `]` (array
+  JS, generic TypeScript, dst) yang kalau tidak di-escape bisa salah
+  ditafsir sebagai style tag rich (bug class yang sama seperti kasus
+  literal `[OK]` yang pernah ditemukan sebelumnya - diverifikasi lewat
+  diff sungguhan yang mengandung `[1, 2, 3]` dan `[VIP]`).
+- **Git Status (menu utama) sekarang nampilin NAMA FILE per kategori**,
+  bukan cuma jumlah - dikelompokkan per status (Modified/Added/Deleted/
+  Untracked) dengan warna berbeda.
+
+### Diperbaiki (bug nyata, bukan yang direncanakan)
+- **`run_git()` di `utils.py` motong 1 karakter pertama nama file** pada
+  entri PERTAMA dari `git status --porcelain` kapan pun kode statusnya
+  diawali spasi (mis. ` M`, ` D` untuk perubahan belum di-stage) - `a.txt`
+  terbaca jadi `.txt`. Akar masalahnya: `run_git()` pakai `.strip()` pada
+  seluruh stdout gabungan, yang menghapus spasi bermakna di awal baris
+  pertama porcelain output. Fix: ganti ke `.rstrip()` (cuma buang
+  whitespace di akhir), diverifikasi tidak merusak 140+ caller lain (yang
+  sudah re-`.strip()` hasilnya sendiri tetap sama perilakunya; yang
+  parsing posisional seperti `git branch --list` sudah `.strip()` per
+  baris, bukan bergantung ke .strip() global). Ini kemungkinan alasan
+  fitur Git Status sebelumnya sengaja cuma nampilin ANGKA, bukan nama
+  file - begitu nama file ditampilkan (perubahan di atas), bug ini baru
+  kelihatan nyata.
+- Diuji pakai repo git asli (bukan cuma unit test): `_status_files()`
+  sekarang mengembalikan `a.txt` utuh, bukan `.txt`.
+
+## v1.4.0 (Fitur: Buat/Hapus Repository & Ubah Visibilitas di GitHub)
+
+### Ditambahkan
+- **Buat Repository Baru (GitHub)** di menu Repository: setara tombol
+  "New repository" di web GitHub - nama, deskripsi, Public/Private,
+  centang "Add README.md" otomatis, pilih template `.gitignore` (Node,
+  Python, Java, dst), lalu opsional langsung di-clone ke perangkat &
+  dijadikan repository aktif. Pakai `gh repo create`, butuh GitHub CLI
+  sudah login (dicek lewat `gh_ready()`, sama seperti fitur Pull Request).
+- **Hapus Repository dari GitHub** (bukan cuma dari daftar lokal) - di
+  sub-menu aksi per-repository. Destruktif & gak bisa dibatalkan di sisi
+  GitHub, jadi wajib ketik ulang nama repo persis buat konfirmasi (pola
+  sama seperti Force Push / Hapus Semua Stash). Folder lokal di disk
+  TIDAK ikut terhapus.
+- **Ubah Visibilitas Repository** (Public <-> Private) - di sub-menu aksi
+  per-repository. Nunjukin visibilitas saat ini dulu, kasih peringatan
+  konsekuensi (Public: kode & riwayat jadi terlihat publik; Private:
+  kolaborator yang belum ditambahkan manual bisa kehilangan akses)
+  sebelum konfirmasi.
+- **`extract_owner_repo()` (fungsi murni baru di `utils.py`)**: dari URL
+  remote (https/ssh/scp-like), ambil `(owner, repo)` - dipakai fitur
+  Hapus & Ubah Visibilitas supaya otomatis tahu nama repo GitHub dari
+  remote origin repo lokal, user gak perlu ketik ulang manual. Diuji unit
+  test (7 kasus: https, tanpa .git, scp-like, ssh://, host bukan GitHub,
+  string kosong, input sembarangan) + diuji fungsional pakai repo git
+  asli dengan remote sungguhan.
+
+### Perubahan
+- `_gh_ready()` yang tadinya cuma ada lokal di `merge.py` dipindah jadi
+  `gh_ready()` shared di `settings.py`, dipakai bareng oleh `merge.py`
+  (fitur PR) dan `repository.py` (fitur GitHub baru di atas) - satu
+  sumber kebenaran, gak diduplikasi ulang.
+- Folder tujuan clone (dulu logic-nya nyatu di `clone_repository()`)
+  diextract jadi `_pick_clone_destination()` + `_do_clone()` yang dipakai
+  bareng oleh `clone_repository()` dan `create_repository()`.
+- Materi baru di menu "Belajar Git": Visibilitas Repository.
+
 ## v1.3.0 (Fitur: Stash, Rebase, Cherry-pick)
 
 ### Ditambahkan

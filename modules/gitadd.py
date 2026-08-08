@@ -6,6 +6,7 @@ Menu Git Add: Add Semua, Add File Tertentu, Unstage, Refresh.
 import questionary
 from rich.console import Console
 from rich.table import Table
+from rich.markup import escape
 
 from modules.utils import run_git
 from modules.settings import load_config
@@ -49,6 +50,75 @@ def tampilkan_status(repo: str) -> None:
     for code, path in files:
         table.add_row(code.strip() or "?", path)
     console.print(table)
+
+
+def _print_diff_content(diff_text: str) -> None:
+    """Render isi 'git diff' dengan pewarnaan per baris: hijau = ditambah,
+    merah = dihapus, cyan = header hunk (@@...@@), redup = metadata
+    (diff --git, index ...). SEMUA baris di-escape() dulu sebelum di-print
+    lewat rich - isi kode sungguhan sering mengandung karakter '[' ']'
+    (array JS, generic TypeScript, dsb) yang kalau tidak di-escape bisa
+    salah ditafsir rich sebagai style tag (bug class yang sama seperti
+    kasus literal '[OK]' yang pernah ditemukan sebelumnya)."""
+    if not diff_text.strip():
+        console.print("[dim]Tidak ada perbedaan untuk ditampilkan.[/dim]")
+        return
+    for line in diff_text.splitlines():
+        safe = escape(line)
+        if line.startswith("+++") or line.startswith("---"):
+            console.print(f"[bold]{safe}[/bold]")
+        elif line.startswith("@@"):
+            console.print(f"[cyan]{safe}[/cyan]")
+        elif line.startswith("diff --git") or line.startswith("index "):
+            console.print(f"[dim]{safe}[/dim]")
+        elif line.startswith("+"):
+            console.print(f"[green]{safe}[/green]")
+        elif line.startswith("-"):
+            console.print(f"[red]{safe}[/red]")
+        else:
+            console.print(safe)
+
+
+def lihat_diff() -> None:
+    """Lihat isi perubahan (diff) sebuah file dengan warna jelas - hijau
+    untuk baris ditambah, merah untuk baris dihapus. Bisa lihat perubahan
+    yang belum di-stage (working tree) ATAU yang sudah di-stage (siap
+    commit), supaya jelas apa yang beneran akan masuk ke commit berikutnya."""
+    repo = _get_active_repo()
+    if not repo:
+        return
+
+    sumber = questionary.select(
+        "Diff dari mana?",
+        choices=["Belum di-stage (working tree)", "Sudah di-stage (siap commit)", "Batal"],
+    ).ask()
+    if not sumber or sumber == "Batal":
+        return
+    cached = sumber.startswith("Sudah")
+
+    name_only_args = ["diff", "--cached", "--name-only"] if cached else ["diff", "--name-only"]
+    ok, out, _err = run_git(name_only_args, cwd=repo)
+    if not ok or not out.strip():
+        label = "staging area" if cached else "working tree"
+        console.print(f"[yellow]Tidak ada file dengan perubahan di {label}.[/yellow]")
+        return
+    files = out.splitlines()
+
+    pilihan = questionary.select(
+        "Pilih file untuk dilihat diff-nya:", choices=files + ["Semua File"]
+    ).ask()
+    if not pilihan:
+        return
+
+    base_args = ["diff", "--cached"] if cached else ["diff"]
+    target_args = base_args if pilihan == "Semua File" else base_args + ["--", pilihan]
+    ok, diff_out, err = run_git(target_args, cwd=repo)
+    if not ok:
+        console.print(f"[red]Gagal mengambil diff: {err}[/red]")
+        return
+
+    console.rule(f"[bold cyan]Diff - {pilihan}")
+    _print_diff_content(diff_out)
 
 
 def add_semua() -> None:
@@ -123,21 +193,22 @@ def refresh() -> None:
 
 def git_status_lengkap() -> None:
     """Tampilan lengkap untuk menu 'Git Status' di menu utama:
-    Modified, Added, Deleted, Untracked, Ahead, Behind, Clean."""
+    Modified, Added, Deleted, Untracked (LENGKAP dengan nama filenya,
+    bukan cuma jumlah), Ahead, Behind, Clean."""
     repo = _get_active_repo()
     if not repo:
         return
     files = _status_files(repo)
-    modified = added = deleted = untracked = 0
-    for code, _path in files:
+    kategori: dict[str, list[str]] = {"Modified": [], "Added": [], "Deleted": [], "Untracked": []}
+    for code, path in files:
         if code.strip() == "??":
-            untracked += 1
+            kategori["Untracked"].append(path)
         elif "M" in code:
-            modified += 1
+            kategori["Modified"].append(path)
         elif "A" in code:
-            added += 1
+            kategori["Added"].append(path)
         elif "D" in code:
-            deleted += 1
+            kategori["Deleted"].append(path)
 
     ok, branch, _err = run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo)
     branch = branch if ok else "-"
@@ -152,17 +223,21 @@ def git_status_lengkap() -> None:
         except ValueError:
             pass
 
-    table = Table(title=f"Git Status - branch '{branch}'", header_style="bold cyan")
-    table.add_column("Kategori")
-    table.add_column("Jumlah")
-    table.add_row("Modified", str(modified))
-    table.add_row("Added", str(added))
-    table.add_row("Deleted", str(deleted))
-    table.add_row("Untracked", str(untracked))
-    table.add_row("Ahead", str(ahead))
-    table.add_row("Behind", str(behind))
-    table.add_row("Clean", "Ya" if not files else "Tidak")
-    console.print(table)
+    console.rule(f"[bold cyan]Git Status - branch '{branch}'")
+    console.print(f"Ahead  : {ahead}  |  Behind : {behind}  |  Clean : {'Ya' if not files else 'Tidak'}\n")
+
+    warna = {"Modified": "yellow", "Added": "green", "Deleted": "red", "Untracked": "dim"}
+    if not files:
+        console.print("[green]Tidak ada perubahan. Working tree bersih.[/green]")
+        return
+    for label, daftar in kategori.items():
+        if not daftar:
+            continue
+        warna_label = warna[label]
+        console.print(f"[bold {warna_label}]{label} ({len(daftar)})[/bold {warna_label}]")
+        for path in daftar:
+            console.print(f"  [{warna_label}]{escape(path)}[/{warna_label}]")
+        console.print()
 
 
 def show_help() -> None:
@@ -171,6 +246,9 @@ def show_help() -> None:
         "\n[bold cyan]Bantuan - Git Add[/bold cyan]\n"
         "- Add Semua: menambahkan semua perubahan ke staging area.\n"
         "- Add File Tertentu: memilih file tertentu untuk ditambahkan.\n"
+        "- Lihat Diff: melihat isi perubahan per baris (hijau = ditambah,\n"
+        "  merah = dihapus) sebelum di-add/commit - bisa lihat yang belum\n"
+        "  di-stage atau yang sudah di-stage.\n"
         "- Unstage: membatalkan file dari staging area (belum menghapus perubahan).\n"
         "- Refresh: menampilkan ulang status perubahan terkini.\n"
     )
@@ -183,7 +261,7 @@ def menu() -> None:
         console.rule("[bold cyan]Git Add")
         choice = questionary.select(
             "Pilih aksi:",
-            choices=["Add Semua", "Add File Tertentu", "Unstage", "Refresh", "? Help", "Kembali"],
+            choices=["Add Semua", "Add File Tertentu", "Lihat Diff", "Unstage", "Refresh", "? Help", "Kembali"],
         ).ask()
         if choice is None or choice == "Kembali":
             return
@@ -191,6 +269,7 @@ def menu() -> None:
             {
                 "Add Semua": add_semua,
                 "Add File Tertentu": add_file_tertentu,
+                "Lihat Diff": lihat_diff,
                 "Unstage": unstage,
                 "Refresh": refresh,
                 "? Help": show_help,

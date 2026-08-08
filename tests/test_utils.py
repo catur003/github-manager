@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from modules.utils import (
     normalize_repo_url,
+    extract_owner_repo,
     sha1_of_file,
     sha1_of_bytes,
     human_size,
@@ -51,6 +52,45 @@ class TestNormalizeRepoUrl(unittest.TestCase):
     def test_invalid_shorthand_with_space_unchanged(self):
         text = "bukan shorthand valid"
         self.assertEqual(normalize_repo_url(text), text)
+
+
+class TestExtractOwnerRepo(unittest.TestCase):
+    """extract_owner_repo() adalah kebalikan dari normalize_repo_url() -
+    dipakai fitur Hapus Repository & Ubah Visibilitas (GitHub) supaya tahu
+    'owner/repo' dari remote origin repo lokal tanpa user ketik manual."""
+
+    def test_https_with_dot_git(self):
+        self.assertEqual(
+            extract_owner_repo("https://github.com/catur003/ZenStock.git"),
+            ("catur003", "ZenStock"),
+        )
+
+    def test_https_without_dot_git(self):
+        self.assertEqual(
+            extract_owner_repo("https://github.com/catur003/ZenStock"),
+            ("catur003", "ZenStock"),
+        )
+
+    def test_scp_like_ssh(self):
+        self.assertEqual(
+            extract_owner_repo("git@github.com:catur003/ZenStock.git"),
+            ("catur003", "ZenStock"),
+        )
+
+    def test_ssh_scheme(self):
+        self.assertEqual(
+            extract_owner_repo("ssh://git@github.com/catur003/ZenStock.git"),
+            ("catur003", "ZenStock"),
+        )
+
+    def test_non_github_host_returns_none(self):
+        self.assertIsNone(extract_owner_repo("https://gitlab.com/catur003/ZenStock.git"))
+
+    def test_empty_string_returns_none(self):
+        self.assertIsNone(extract_owner_repo(""))
+
+    def test_garbage_input_returns_none(self):
+        self.assertIsNone(extract_owner_repo("bukan url sama sekali"))
 
 
 class TestHash(unittest.TestCase):

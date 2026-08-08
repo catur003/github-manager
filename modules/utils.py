@@ -37,7 +37,7 @@ BACKUP_DIR: Path = BASE_DIR / "backup"
 CONFIG_FILE: Path = CONFIG_DIR / "config.json"
 
 # Versi aplikasi saat ini & lokasi repo GitHub resmi (dipakai modules/update.py)
-APP_VERSION: str = "1.3.0"
+APP_VERSION: str = "1.5.0"
 GITHUB_REPO: str = "catur003/github-manager"
 
 
@@ -84,7 +84,7 @@ def run_git(args: List[str], cwd: Optional[str] = None,
         log_debug(
             redact_secrets(f"git {' '.join(args)} | cwd={cwd or '.'} | exit={result.returncode}")
         )
-        return success, result.stdout.strip(), redact_secrets(result.stderr.strip())
+        return success, result.stdout.rstrip(), redact_secrets(result.stderr.strip())
     except FileNotFoundError:
         return False, "", "Git tidak ditemukan. Pastikan git sudah terinstall (pkg install git)."
     except subprocess.TimeoutExpired:
@@ -140,6 +140,45 @@ def normalize_repo_url(text: str) -> str:
         repo = repo[:-4] if repo.endswith(".git") else repo
         return f"https://github.com/{owner}/{repo}.git"
     return text
+
+
+def extract_owner_repo(url: str) -> Optional[Tuple[str, str]]:
+    """Kebalikan dari normalize_repo_url(): dari URL remote GitHub (https,
+    ssh://, atau git@ bentuk scp-like), ambil (owner, repo). Return None
+    kalau bukan URL GitHub yang valid atau gak bisa diparse.
+
+    Dipakai fitur yang butuh tahu 'owner/repo' dari repo lokal (Hapus
+    Repository & Ubah Visibilitas di GitHub) - supaya user gak perlu
+    ngetik ulang manual nama repo yang sudah ada di remote origin-nya."""
+    if not url:
+        return None
+    url = url.strip()
+    if url.endswith(".git"):
+        url = url[:-4]
+
+    # Bentuk scp-like: git@github.com:owner/repo
+    if url.startswith("git@"):
+        if ":" not in url:
+            return None
+        path = url.split(":", 1)[1]
+    elif url.startswith(("https://", "http://", "ssh://")):
+        # Buang skema, ambil bagian setelah host (github.com/owner/repo...)
+        without_scheme = url.split("://", 1)[1]
+        if "/" not in without_scheme:
+            return None
+        host, path = without_scheme.split("/", 1)
+        if "github.com" not in host.lower():
+            return None
+    else:
+        return None
+
+    parts = [p for p in path.split("/") if p]
+    if len(parts) < 2:
+        return None
+    owner, repo = parts[0], parts[1]
+    if not owner or not repo:
+        return None
+    return owner, repo
 
 
 def sha1_of_file(path: str) -> Optional[str]:

@@ -4,14 +4,16 @@ Menu Repository: pilih repository, cari otomatis, clone, tambah,
 ganti, dan lihat repository aktif.
 """
 
+import json
 import os
+import subprocess
 from typing import Optional, Tuple
 
 import questionary
 from rich.console import Console
 
-from modules.utils import run_git, is_git_repo, find_git_repos, normalize_repo_url, spinner, redact_secrets
-from modules.settings import load_config, save_config, get_repositories, add_to_repositories, toggle_favorite, remove_from_repositories
+from modules.utils import run_git, is_git_repo, find_git_repos, normalize_repo_url, extract_owner_repo, spinner, redact_secrets
+from modules.settings import load_config, save_config, get_repositories, add_to_repositories, toggle_favorite, remove_from_repositories, gh_ready
 from modules.logger import log_activity, log_error
 from datetime import datetime
 
@@ -38,6 +40,64 @@ def _valid_repo_input(raw: str) -> bool:
     return len(parts) == 2 and all(parts) and " " not in raw
 
 
+def _pick_clone_destination(nama_default: str) -> Optional[str]:
+    """Tanya user folder tujuan clone (default ~/<nama_default>), dengan
+    penanganan kalau folder sudah ada & tidak kosong (timpa/pilih
+    lain/batal). Return path tujuan yang sudah difinalisasi, atau None
+    kalau user membatalkan. Dipakai bareng oleh clone_repository() dan
+    create_repository() - satu sumber kebenaran untuk logic ini."""
+    home = os.path.expanduser("~")
+    while True:
+        tujuan = questionary.text(
+            f"Masukkan folder tujuan (kosongkan untuk ~/{nama_default}):", default=""
+        ).ask()
+        if tujuan is None:
+            return None
+        if tujuan.strip():
+            dest_path = tujuan.strip() if os.path.isabs(tujuan.strip()) else os.path.join(home, tujuan.strip())
+        else:
+            dest_path = os.path.join(home, nama_default)
+
+        if os.path.exists(dest_path) and os.listdir(dest_path):
+            console.print(f"[yellow]Folder '{dest_path}' sudah ada dan tidak kosong.[/yellow]")
+            aksi = questionary.select(
+                "Folder tujuan sudah terisi. Pilih aksi:",
+                choices=["Timpa (hapus isi folder lalu clone ulang)", "Pilih folder lain", "Batal"],
+            ).ask()
+            if not aksi or aksi == "Batal":
+                return None
+            if aksi == "Pilih folder lain":
+                continue
+            konfirmasi = questionary.confirm(
+                f"Yakin hapus semua isi '{dest_path}' lalu clone ulang? Aksi ini tidak dapat dibatalkan.",
+                default=False,
+            ).ask()
+            if not konfirmasi:
+                continue
+            try:
+                import shutil as _shutil
+                _shutil.rmtree(dest_path)
+            except OSError as e:
+                console.print(f"[red]Gagal menghapus folder lama: {e}[/red]")
+                return None
+        return dest_path
+
+
+def _do_clone(url: str, dest_path: str) -> bool:
+    """Jalankan 'git clone' dengan spinner + pesan error konsisten.
+    Return True kalau berhasil. Dipakai bareng clone_repository() dan
+    create_repository()."""
+    with spinner(f"Sedang melakukan clone ke {dest_path}..."):
+        ok, out, err = run_git(["clone", url, dest_path])
+    if not ok:
+        console.print(f"[red]Clone gagal: {_human_git_error(err)}[/red]")
+        log_error("Clone repository gagal", raw_detail=err)
+        return False
+    console.print(f"[green]Clone berhasil ke {dest_path}.[/green]\n{out}")
+    log_activity(redact_secrets(f"Repository di-clone dari {url} ke {dest_path}"))
+    return True
+
+
 def clone_repository() -> None:
     """Clone Repository Wizard: input URL/owner-repo (dengan validasi),
     pilih folder tujuan, cek apakah folder sudah ada + konfirmasi
@@ -59,51 +119,12 @@ def clone_repository() -> None:
     # PRIORITAS 2 #5: repository HARUS di-clone ke ~/<nama>, bukan ikut cwd
     # aplikasi (sebelumnya bisa jadi ~/github-manager/ZenStock kalau app
     # dijalankan dari situ). Selalu resolve ke path absolut di HOME.
-    home = os.path.expanduser("~")
-
-    while True:
-        tujuan = questionary.text(
-            f"Masukkan folder tujuan (kosongkan untuk ~/{nama_default}):", default=""
-        ).ask()
-        if tujuan is None:
-            return
-        if tujuan.strip():
-            dest_path = tujuan.strip() if os.path.isabs(tujuan.strip()) else os.path.join(home, tujuan.strip())
-        else:
-            dest_path = os.path.join(home, nama_default)
-
-        if os.path.exists(dest_path) and os.listdir(dest_path):
-            console.print(f"[yellow]Folder '{dest_path}' sudah ada dan tidak kosong.[/yellow]")
-            aksi = questionary.select(
-                "Folder tujuan sudah terisi. Pilih aksi:",
-                choices=["Timpa (hapus isi folder lalu clone ulang)", "Pilih folder lain", "Batal"],
-            ).ask()
-            if not aksi or aksi == "Batal":
-                return
-            if aksi == "Pilih folder lain":
-                continue
-            konfirmasi = questionary.confirm(
-                f"Yakin hapus semua isi '{dest_path}' lalu clone ulang? Aksi ini tidak dapat dibatalkan.",
-                default=False,
-            ).ask()
-            if not konfirmasi:
-                continue
-            try:
-                import shutil as _shutil
-                _shutil.rmtree(dest_path)
-            except OSError as e:
-                console.print(f"[red]Gagal menghapus folder lama: {e}[/red]")
-                return
-        break
-
-    with spinner(f"Sedang melakukan clone ke {dest_path}..."):
-        ok, out, err = run_git(["clone", url, dest_path])
-    if not ok:
-        console.print(f"[red]Clone gagal: {_human_git_error(err)}[/red]")
-        log_error("Clone repository gagal", raw_detail=err)
+    dest_path = _pick_clone_destination(nama_default)
+    if not dest_path:
         return
-    console.print(f"[green]Clone berhasil ke {dest_path}.[/green]\n{out}")
-    log_activity(redact_secrets(f"Repository di-clone dari {url} ke {dest_path}"))
+
+    if not _do_clone(url, dest_path):
+        return
 
     jadikan_aktif = questionary.confirm(
         f"Jadikan '{nama_default}' sebagai repository aktif?", default=True
@@ -409,6 +430,249 @@ def _human_git_error(stderr: str) -> str:
     return stderr or "Terjadi kesalahan yang tidak diketahui."
 
 
+# Template .gitignore yang paling umum dipakai (subset dari daftar resmi
+# GitHub di github/gitignore) - biar pilihan gak kepanjangan/scroll terus
+# di layar HP. Nama harus PERSIS sama seperti nama file template di GitHub
+# (case-sensitive), karena ini langsung dioper ke 'gh repo create --gitignore'.
+GITIGNORE_TEMPLATES = [
+    "Node", "Python", "Java", "Go", "C++", "C", "Ruby", "Swift",
+    "Android", "macOS", "VisualStudioCode",
+]
+
+
+def create_repository() -> None:
+    """Buat Repository Baru di GitHub - setara tombol 'New repository' di
+    web GitHub, termasuk opsi centang 'Add a README file' & pilih template
+    .gitignore, lalu (opsional) langsung di-clone ke perangkat."""
+    if not gh_ready(console, "Buat Repository Baru"):
+        return
+
+    nama = questionary.text("Nama repository baru:").ask()
+    if not nama or not nama.strip():
+        console.print("[yellow]Nama repository tidak boleh kosong. Dibatalkan.[/yellow]")
+        return
+    nama = nama.strip()
+    if " " in nama:
+        console.print("[red]Nama repository tidak boleh mengandung spasi.[/red]")
+        return
+
+    deskripsi = questionary.text("Deskripsi (opsional, boleh dikosongkan):", default="").ask() or ""
+
+    visibilitas = questionary.select(
+        "Visibilitas repository:", choices=["Public", "Private"]
+    ).ask()
+    if not visibilitas:
+        console.print("[yellow]Dibatalkan.[/yellow]")
+        return
+
+    tambah_readme = questionary.confirm("Tambahkan README.md otomatis?", default=True).ask()
+
+    template_choices = GITIGNORE_TEMPLATES + ["Tidak pakai .gitignore"]
+    gitignore_pilihan = questionary.select(
+        "Template .gitignore:", choices=template_choices, default="Tidak pakai .gitignore"
+    ).ask()
+    gitignore_template = None if not gitignore_pilihan or gitignore_pilihan == "Tidak pakai .gitignore" else gitignore_pilihan
+
+    console.print(
+        f"\n[cyan]Ringkasan:[/cyan]\n"
+        f"  Nama       : {nama}\n"
+        f"  Visibilitas: {visibilitas}\n"
+        f"  README.md  : {'Ya' if tambah_readme else 'Tidak'}\n"
+        f"  .gitignore : {gitignore_template or 'Tidak pakai'}\n"
+    )
+    yakin = questionary.confirm("Buat repository ini di GitHub?", default=True).ask()
+    if not yakin:
+        console.print("[yellow]Dibatalkan.[/yellow]")
+        return
+
+    args = ["repo", "create", nama, f"--{visibilitas.lower()}"]
+    if deskripsi.strip():
+        args += ["--description", deskripsi.strip()]
+    if tambah_readme:
+        args.append("--add-readme")
+    if gitignore_template:
+        args += ["--gitignore", gitignore_template]
+
+    with spinner("Membuat repository di GitHub..."):
+        result = subprocess.run(["gh"] + args, capture_output=True, text=True, timeout=60)
+
+    if result.returncode != 0:
+        pesan = (result.stderr or result.stdout).strip()
+        console.print(f"[red]Gagal membuat repository: {pesan}[/red]")
+        log_error("Gagal gh repo create", raw_detail=result.stderr)
+        return
+
+    repo_url = (result.stdout or "").strip().splitlines()[-1] if result.stdout else ""
+    console.print(f"[green]✓ Repository berhasil dibuat.[/green]\n{repo_url}")
+    log_activity(f"Repository GitHub dibuat: {nama} ({visibilitas})")
+
+    clone_sekarang = questionary.confirm("Clone repository ini ke perangkat sekarang?", default=True).ask()
+    if not clone_sekarang:
+        return
+    if not repo_url:
+        console.print("[yellow]URL repository tidak terbaca dari output gh. Clone manual lewat menu 'Clone Repository'.[/yellow]")
+        return
+
+    dest_path = _pick_clone_destination(nama)
+    if not dest_path:
+        return
+    if not _do_clone(repo_url, dest_path):
+        return
+
+    jadikan_aktif = questionary.confirm(f"Jadikan '{nama}' sebagai repository aktif?", default=True).ask()
+    if jadikan_aktif:
+        _set_active_repository(dest_path)
+
+
+def _get_github_owner_repo(repo_path: str) -> Optional[Tuple[str, str]]:
+    """Ambil (owner, repo) dari remote 'origin' repository lokal. Return
+    None kalau repo gak punya remote origin atau bukan remote GitHub."""
+    ok, url, _err = run_git(["remote", "get-url", "origin"], cwd=repo_path)
+    if not ok or not url.strip():
+        return None
+    return extract_owner_repo(url.strip())
+
+
+def delete_repository() -> None:
+    """Hapus Repository dari GitHub (BUKAN cuma hapus dari daftar lokal).
+    Aksi ini destruktif & TIDAK bisa dibatalkan di sisi GitHub - user wajib
+    ketik ulang nama repo persis untuk konfirmasi, sama seperti pola
+    konfirmasi Force Push / Hapus Semua Stash di modul lain."""
+    if not gh_ready(console, "Hapus Repository"):
+        return
+    repo = _get_active_repo_or_pick()
+    if not repo:
+        return
+    owner_repo = _get_github_owner_repo(repo)
+    if not owner_repo:
+        console.print(
+            "[yellow]Repository ini tidak punya remote origin ke GitHub, "
+            "atau remote-nya bukan github.com. Tidak ada yang bisa dihapus di GitHub.[/yellow]"
+        )
+        return
+    owner, nama = owner_repo
+    full_name = f"{owner}/{nama}"
+
+    console.print(
+        f"[red]PERINGATAN: ini akan menghapus repository '{full_name}' DARI GITHUB, "
+        "termasuk seluruh riwayat, issue, dan Pull Request. TIDAK BISA DIBATALKAN.[/red]\n"
+        "[yellow]Folder lokal di perangkat TIDAK ikut terhapus.[/yellow]"
+    )
+    ketikan = questionary.text(f"Ketik ulang nama repository ('{nama}') untuk konfirmasi:").ask()
+    if ketikan != nama:
+        console.print("[yellow]Nama tidak cocok. Dibatalkan.[/yellow]")
+        return
+
+    with spinner(f"Menghapus '{full_name}' dari GitHub..."):
+        result = subprocess.run(
+            ["gh", "repo", "delete", full_name, "--yes"], capture_output=True, text=True, timeout=30
+        )
+    if result.returncode != 0:
+        pesan = (result.stderr or result.stdout).strip()
+        console.print(f"[red]Gagal menghapus repository: {pesan}[/red]")
+        log_error("Gagal gh repo delete", raw_detail=result.stderr)
+        return
+    console.print(f"[green]✓ Repository '{full_name}' berhasil dihapus dari GitHub.[/green]")
+    log_activity(f"Repository GitHub dihapus: {full_name}")
+
+    hapus_daftar = questionary.confirm(
+        "Hapus juga dari daftar Repository Manager? (folder di disk tetap aman)", default=True
+    ).ask()
+    if hapus_daftar:
+        remove_from_repositories(repo)
+        config = load_config()
+        if config.get("active_repository") == repo:
+            config["active_repository"] = ""
+            save_config(config)
+
+
+def ubah_visibilitas_repository() -> None:
+    """Ubah visibilitas repository di GitHub (Public <-> Private)."""
+    if not gh_ready(console, "Ubah Visibilitas Repository"):
+        return
+    repo = _get_active_repo_or_pick()
+    if not repo:
+        return
+    owner_repo = _get_github_owner_repo(repo)
+    if not owner_repo:
+        console.print(
+            "[yellow]Repository ini tidak punya remote origin ke GitHub, "
+            "atau remote-nya bukan github.com.[/yellow]"
+        )
+        return
+    owner, nama = owner_repo
+    full_name = f"{owner}/{nama}"
+
+    with spinner("Mengecek visibilitas saat ini..."):
+        result = subprocess.run(
+            ["gh", "repo", "view", full_name, "--json", "visibility"],
+            capture_output=True, text=True, timeout=20,
+        )
+    visibilitas_sekarang = None
+    if result.returncode == 0:
+        try:
+            visibilitas_sekarang = json.loads(result.stdout or "{}").get("visibility")
+        except json.JSONDecodeError:
+            pass
+
+    console.print(f"Visibilitas saat ini: [cyan]{visibilitas_sekarang or 'tidak diketahui'}[/cyan]")
+    target = questionary.select(
+        "Ubah visibilitas menjadi:", choices=["Public", "Private", "Batal"]
+    ).ask()
+    if not target or target == "Batal":
+        return
+    if visibilitas_sekarang and target.lower() == visibilitas_sekarang.lower():
+        console.print(f"[yellow]Repository sudah berstatus {target}.[/yellow]")
+        return
+
+    if target == "Public":
+        console.print(
+            "[yellow]PERHATIAN: repository akan terlihat publik oleh siapa saja "
+            "(termasuk isi kode, riwayat commit, dan issue).[/yellow]"
+        )
+    else:
+        console.print(
+            "[yellow]PERHATIAN: repository akan disembunyikan dari publik. "
+            "Kolaborator yang belum ditambahkan manual bisa kehilangan akses.[/yellow]"
+        )
+    yakin = questionary.confirm(f"Yakin ubah '{full_name}' menjadi {target}?", default=False).ask()
+    if not yakin:
+        console.print("[yellow]Dibatalkan.[/yellow]")
+        return
+
+    with spinner(f"Mengubah visibilitas '{full_name}' menjadi {target}..."):
+        result = subprocess.run(
+            ["gh", "repo", "edit", full_name, "--visibility", target.lower(),
+             "--accept-visibility-change-consequences"],
+            capture_output=True, text=True, timeout=30,
+        )
+    if result.returncode != 0:
+        pesan = (result.stderr or result.stdout).strip()
+        console.print(f"[red]Gagal mengubah visibilitas: {pesan}[/red]")
+        log_error("Gagal gh repo edit --visibility", raw_detail=result.stderr)
+        return
+    console.print(f"[green]✓ Visibilitas '{full_name}' berhasil diubah menjadi {target}.[/green]")
+    log_activity(f"Visibilitas repository GitHub diubah: {full_name} -> {target}")
+
+
+def _get_active_repo_or_pick() -> Optional[str]:
+    """Ambil repository aktif dari config; kalau belum ada, biarkan user
+    pilih dari daftar tersimpan. Dipakai oleh fitur yang butuh tahu
+    'repo mana' sebelum bisa jalan (Hapus Repository, Ubah Visibilitas)."""
+    active_repo = load_config().get("active_repository", "")
+    if active_repo and is_git_repo(active_repo):
+        return active_repo
+    repos = get_repositories()
+    if not repos:
+        console.print("[yellow]Belum ada repository aktif atau tersimpan. Pilih/clone repository dulu.[/yellow]")
+        return None
+    choices = [os.path.basename(r["path"]) + f" | {r['path']}" for r in repos] + ["Batal"]
+    pilihan = questionary.select("Pilih repository:", choices=choices).ask()
+    if not pilihan or pilihan == "Batal":
+        return None
+    return pilihan.split(" | ", 1)[-1]
+
+
 def tambah_repository_manual() -> None:
     """
     Tambah repository dengan memasukkan path secara manual.
@@ -438,14 +702,17 @@ def repository_manager() -> None:
         console.rule("[bold cyan]Repository Manager")
         repos = get_repositories()  # from settings
         if not repos:
-            console.print("[yellow]Belum ada repository tersimpan. Gunakan scan, clone, atau tambah manual.[/yellow]")
+            console.print("[yellow]Belum ada repository tersimpan. Gunakan scan, clone, buat baru, atau tambah manual.[/yellow]")
             choice = questionary.select(
-                "Pilih aksi:", choices=["Scan Repositories", "Clone Repository", "Tambah Manual", "Kembali"]
+                "Pilih aksi:",
+                choices=["Scan Repositories", "Clone Repository", "Buat Repository Baru (GitHub)", "Tambah Manual", "Kembali"],
             ).ask()
             if choice == "Scan Repositories":
                 scan_repositories()
             elif choice == "Clone Repository":
                 clone_repository()
+            elif choice == "Buat Repository Baru (GitHub)":
+                create_repository()
             elif choice == "Tambah Manual":
                 tambah_repository_manual()
             elif choice == "Kembali":
@@ -475,7 +742,7 @@ def repository_manager() -> None:
             mark = "⭐ " if r.get("favorite", False) else ""
             active_mark = " ✓" if path == active_repo else ""
             choices.append(f"{mark}{name} ({branch}, {status}) - {last_open}{active_mark} | {path}")
-        choices += ["Scan Repositories", "Clone Repository", "Tambah Manual", "Compare Repository", "Refresh", "? Search", "Favorite", "Kembali"]
+        choices += ["Scan Repositories", "Clone Repository", "Buat Repository Baru (GitHub)", "Tambah Manual", "Compare Repository", "Refresh", "? Search", "Favorite", "Kembali"]
 
         pilihan = questionary.select("Pilih repository atau aksi:", choices=choices).ask()
         if not pilihan or pilihan == "Kembali":
@@ -485,6 +752,9 @@ def repository_manager() -> None:
             continue
         if pilihan == "Clone Repository":
             clone_repository()
+            continue
+        if pilihan == "Buat Repository Baru (GitHub)":
+            create_repository()
             continue
         if pilihan == "Tambah Manual":
             tambah_repository_manual()
@@ -512,11 +782,19 @@ def repository_manager() -> None:
 
 
 def repo_action_menu(path: str) -> None:
-    """Sub-menu aksi untuk satu repository terpilih: Gunakan / Hapus dari daftar / Buka lokasi / Batal."""
+    """Sub-menu aksi untuk satu repository terpilih: Gunakan / Ubah
+    Visibilitas / Hapus dari GitHub / Hapus dari Daftar / Buka Lokasi / Batal."""
     name = os.path.basename(path)
     aksi = questionary.select(
         f"Aksi untuk '{name}':",
-        choices=["Gunakan Repository", "Buka Lokasi", "Hapus dari Daftar", "Batal"],
+        choices=[
+            "Gunakan Repository",
+            "Buka Lokasi",
+            "Ubah Visibilitas (GitHub)",
+            "Hapus dari GitHub",
+            "Hapus dari Daftar",
+            "Batal",
+        ],
     ).ask()
     if aksi is None or aksi == "Batal":
         return
@@ -524,6 +802,12 @@ def repo_action_menu(path: str) -> None:
         use_repo(path)
     elif aksi == "Buka Lokasi":
         open_location(path)
+    elif aksi == "Ubah Visibilitas (GitHub)":
+        use_repo(path)  # pastikan repo ini aktif dulu, biar fungsinya jelas beroperasi di repo yang benar
+        ubah_visibilitas_repository()
+    elif aksi == "Hapus dari GitHub":
+        use_repo(path)
+        delete_repository()
     elif aksi == "Hapus dari Daftar":
         konfirmasi = questionary.confirm(
             f"Hapus '{name}' dari daftar? (Folder di disk TIDAK akan dihapus)", default=False

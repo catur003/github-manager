@@ -11,31 +11,11 @@ import questionary
 from rich.console import Console
 
 from modules.utils import run_git, spinner
-from modules.settings import load_config, _gh_available, _get_gh_login_status
+from modules.settings import load_config, gh_ready
 from modules.logger import log_activity, log_error
 from modules import preflight
 
 console = Console()
-
-
-def _gh_ready() -> bool:
-    """Cek gh CLI terpasang & sudah login. Kalau belum, kasih pesan jelas
-    (bukan wajib install - sesuai spec, fitur PR cuma nyala kalau siap)."""
-    if not _gh_available():
-        console.print(
-            "[yellow]GitHub CLI (gh) tidak terpasang.[/yellow]\n"
-            "Fitur Pull Request butuh 'gh'. Install dulu, lalu login lewat "
-            "menu Pengaturan > GitHub Account."
-        )
-        return False
-    logged_in, _ = _get_gh_login_status()
-    if not logged_in:
-        console.print(
-            "[yellow]Belum login ke GitHub CLI.[/yellow]\n"
-            "Login dulu lewat menu Pengaturan > GitHub Account."
-        )
-        return False
-    return True
 
 
 def _detect_base_branch(repo: str, branches: list[str]) -> str:
@@ -305,7 +285,7 @@ def buat_pull_request() -> None:
         return
     if not preflight.preflight(repo, need_remote=True, label="Buat Pull Request"):
         return
-    if not _gh_ready():
+    if not gh_ready(console, "Fitur Pull Request"):
         return
 
     # Tawarkan Fetch dulu supaya daftar branch (termasuk yang baru dibuat/
@@ -404,7 +384,7 @@ def merge_pull_request() -> None:
         return
     if not preflight.preflight(repo, need_remote=True, label="Merge Pull Request"):
         return
-    if not _gh_ready():
+    if not gh_ready(console, "Fitur Pull Request"):
         return
 
     with spinner("Mengambil daftar Pull Request..."):

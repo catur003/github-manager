@@ -9,6 +9,9 @@ perintah Git. Dibuat khusus agar nyaman dipakai di **Termux Android**
 
 - Dashboard ringkasan repository saat aplikasi dibuka
 - Kelola Repository (pilih, cari otomatis, clone, tambah, ganti)
+- Buat Repository Baru di GitHub (nama, deskripsi, Public/Private, opsi
+  README.md & template `.gitignore` otomatis, langsung clone)
+- Hapus Repository dari GitHub & Ubah Visibilitas (Public/Private)
 - Kelola Branch (lihat, checkout, buat, rename, delete)
 - Upload ZIP / File / Folder ke repository, lengkap dengan preview isi ZIP
   dan backup otomatis sebelum overwrite

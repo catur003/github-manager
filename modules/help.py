@@ -64,6 +64,13 @@ MATERI = {
         "menerapkannya ke branch aktif, tanpa ikut menggabungkan commit lain\n"
         "di branch itu (beda dengan Merge yang menggabungkan semuanya)."
     ),
+    "Visibilitas Repository": (
+        "Public artinya repository bisa dilihat siapa saja di internet.\n"
+        "Private artinya cuma kamu & kolaborator yang ditambahkan manual\n"
+        "yang bisa lihat. Bisa diubah kapan saja lewat Repository Manager\n"
+        "> pilih repo > Ubah Visibilitas - tapi ubah Public jadi Private\n"
+        "bisa bikin orang lain kehilangan akses tanpa sadar."
+    ),
     "Force Push": (
         "Force Push memaksa remote memakai riwayat commit dari lokal kamu,\n"
         "walau berbeda dengan riwayat di server. Berbahaya karena bisa\n"

@@ -303,6 +303,30 @@ def _get_gh_login_status():
         return False, None
 
 
+def gh_ready(console, label: str = "Fitur ini") -> bool:
+    """Cek gh CLI terpasang & sudah login. Kalau belum, kasih pesan jelas
+    lewat `console` yang dioper si pemanggil (supaya pesan tetap konsisten
+    walau dipanggil dari modul manapun). SATU sumber kebenaran untuk cek
+    ini - dipakai oleh merge.py (fitur PR) dan repository.py (fitur
+    Buat/Hapus Repo & Ubah Visibilitas di GitHub), gak didup jadi fungsi
+    lokal terpisah di tiap modul."""
+    if not _gh_available():
+        console.print(
+            f"[yellow]GitHub CLI (gh) tidak terpasang.[/yellow]\n"
+            f"{label} butuh 'gh'. Install dulu, lalu login lewat "
+            "menu Pengaturan > GitHub Account."
+        )
+        return False
+    logged_in, _ = _get_gh_login_status()
+    if not logged_in:
+        console.print(
+            "[yellow]Belum login ke GitHub CLI.[/yellow]\n"
+            "Login dulu lewat menu Pengaturan > GitHub Account."
+        )
+        return False
+    return True
+
+
 def _get_credential_helper() -> str:
     ok, out, _ = run_git(["config", "--global", "credential.helper"])
     return out.strip() if ok and out.strip() else ""
