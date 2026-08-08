@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# bin/github-manager
+# Wrapper supaya command 'github-manager' bisa dipanggil langsung setelah
+# `npm install -g` — npm otomatis symlink file ini ke PATH (mis. $PREFIX/bin
+# di Termux, atau /usr/local/bin di Linux/macOS) dan sudah di-chmod +x
+# (npm selalu chmod 0755 setiap file yang didaftarkan di field "bin").
+#
+# npm cuma ngurusin distribusi + PATH; Python & Git TETAP harus sudah
+# terpasang di sistem (npm gak bisa install itu). Kalau belum ada,
+# scripts/postinstall.js sudah kasih tahu pas 'npm install -g' dijalankan.
+
+set -euo pipefail
+
+# Resolve symlink secara portable (npm selalu symlink file bin ke PATH).
+# Sengaja gak pakai 'readlink -f' - itu ekstensi GNU, gak ada di semua
+# sistem (mis. BSD/macOS readlink lama). Loop di bawah cuma pakai
+# 'readlink' polos (POSIX), lebih portable.
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+    RESOLVED_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$RESOLVED_DIR/$SOURCE"
+done
+DIR="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
+
+PYTHON_BIN=""
+for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+        PYTHON_BIN="$candidate"
+        break
+    fi
+done
+
+if [ -z "$PYTHON_BIN" ]; then
+    echo "Python 3 tidak ditemukan di PATH." >&2
+    echo "Install dulu: pkg install python (Termux) / apt install python3 (Linux)." >&2
+    exit 1
+fi
+
+exec "$PYTHON_BIN" "$DIR/github-manager.py" "$@"

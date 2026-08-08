@@ -1,0 +1,47 @@
+{
+  "name": "github-manager",
+  "version": "1.3.0",
+  "description": "GitHub Repository Manager CLI - kelola Git & GitHub lewat menu interaktif di Termux/Linux tanpa perlu hafal perintah Git.",
+  "bin": {
+    "github-manager": "./bin/github-manager"
+  },
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js"
+  },
+  "files": [
+    "bin",
+    "scripts",
+    "modules",
+    "tests",
+    "github-manager.py",
+    "requirements.txt",
+    "install.sh",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "os": [
+    "linux",
+    "android"
+  ],
+  "engines": {
+    "node": ">=14"
+  },
+  "keywords": [
+    "git",
+    "github",
+    "cli",
+    "termux",
+    "termux-cli",
+    "git-manager"
+  ],
+  "author": "catur003",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/catur003/github-manager.git"
+  },
+  "homepage": "https://github.com/catur003/github-manager#readme",
+  "bugs": {
+    "url": "https://github.com/catur003/github-manager/issues"
+  }
+}

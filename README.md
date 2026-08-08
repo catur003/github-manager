@@ -24,6 +24,55 @@ perintah Git. Dibuat khusus agar nyaman dipakai di **Termux Android**
 
 ## Cara Install
 
+### Opsi A: Lewat pip (`pip install`)
+
+```bash
+pip install github-manager
+```
+
+Ini beda mekanisme sama npm - pip **gak punya konsep "postinstall hook"**
+resmi sama sekali. Yang terjadi:
+- pip/setuptools bikinin script kecil bernama `github-manager` di folder
+  `bin` environment Python kamu (venv atau `~/.local/bin`), isinya
+  langsung `from modules.cli import main` - bukan lewat installer/shell
+  script tambahan, jadi gak ada "kebaca apa enggak" karena memang gak ada
+  hook yang dipanggil.
+- Gak ada script lain yang otomatis jalan pas instalasi. Banner ASCII-nya
+  (lihat bagian "Splash Banner" di bawah) tetap tampil - tapi itu bukan
+  dari proses install, melainkan otomatis muncul pas kamu **pertama kali
+  menjalankan** command `github-manager`.
+
+Python 3.9+ tetap harus sudah terpasang duluan (`pkg install python` di
+Termux / sudah bawaan di kebanyakan distro Linux); `pip install` gak bisa
+masangin Python itu sendiri.
+
+### Opsi B: Lewat npm (`npm install -g`)
+
+```bash
+npm install -g github-manager
+```
+
+Ini bakal:
+- Pasang command `github-manager` ke PATH (lewat field `bin` di `package.json`).
+- Jalanin `scripts/postinstall.js` otomatis, yang cek Python 3 & Git ada
+  atau enggak, dan (kalau kelihatan) nampilin banner ASCII.
+
+> **Catatan penting:** npm (v7 ke atas) itu **nyembunyiin output
+> postinstall secara default** kecuali kamu pakai
+> `npm install -g --foreground-scripts github-manager`. Jadi jangan kaget
+> kalau abis `npm install -g` biasa cuma muncul `added 1 package in Xms`
+> tanpa banner - itu normal, postinstall-nya tetap jalan (cuma diem).
+> Banner-nya tetap dijamin muncul minimal sekali di run pertama
+> `github-manager` (lihat bagian "Splash Banner" di bawah), gak
+> bergantung sama perilaku silent npm itu.
+>
+> npm juga **cuma ngurus command & distribusi file**, bukan environment
+> Python/Git. Python 3 dan Git tetap harus sudah terpasang duluan di
+> sistem kamu (`pkg install python git` di Termux, atau
+> `apt install python3 git` di Linux).
+
+### Opsi C: Lewat Termux (clone + install.sh) - disarankan buat Termux
+
 1. Pastikan Termux sudah terpasang dari F-Droid (disarankan, bukan Play Store).
 2. Download / clone folder project ini ke penyimpanan Termux.
 3. Beri izin eksekusi dan jalankan installer:
@@ -37,6 +86,24 @@ perintah Git. Dibuat khusus agar nyaman dipakai di **Termux Android**
    Installer akan otomatis memasang `python`, `git`, `unzip`, `zip`,
    dependency Python, serta membuat command `github-manager` yang bisa
    dipanggil dari folder mana saja.
+
+## Splash Banner
+
+Banner ASCII "GITHUB MANAGER" tampil di dua tempat:
+- Otomatis di akhir `install.sh` (Opsi C).
+- Otomatis SEKALI di run pertama `github-manager` (dicatat lewat
+  `config['banner_shown']`) - ini jaring pengaman yang berlaku SAMA buat
+  semua cara install (pip, npm, git clone), karena dipicu oleh
+  menjalankan aplikasinya, bukan oleh proses instalasinya. Khusus buat
+  npm ini penting karena postinstall-nya sering silent (lihat Opsi B);
+  buat pip malah satu-satunya cara, karena pip memang tidak punya hook
+  setelah-install sama sekali.
+
+Bisa juga dipanggil manual kapan saja:
+
+```bash
+github-manager --version
+```
 
 ## Cara Menjalankan
 
@@ -68,7 +135,13 @@ Sisanya menggunakan library bawaan Python (`subprocess`, `zipfile`,
 ```
 github-manager/
 ├── install.sh
-├── github-manager.py
+├── github-manager.py      # shim tipis, logic sebenarnya di modules/cli.py
+├── pyproject.toml        # buat distribusi via pip (console_scripts)
+├── package.json           # buat distribusi via npm (bin + postinstall)
+├── bin/
+│   └── github-manager    # shim dipanggil npm sebagai command global
+├── scripts/
+│   └── postinstall.js    # banner + cek dependency saat npm install -g
 ├── requirements.txt
 ├── README.md
 ├── config/          # konfigurasi aplikasi (config.json)
@@ -86,6 +159,8 @@ github-manager/
     ├── merge.py
     ├── stash.py
     ├── rebase.py
+    ├── banner.py
+    ├── cli.py            # logic menu utama (dipakai github-manager.py & pip entry point)
     ├── backup.py
     ├── settings.py
     ├── help.py

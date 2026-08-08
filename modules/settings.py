@@ -29,6 +29,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "backup_otomatis": True,
     "konfirmasi_delete": True,
     "konfirmasi_force_push": True,
+    "banner_shown": False,
     "tema": "default",
 }
 

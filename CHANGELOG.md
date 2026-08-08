@@ -30,6 +30,46 @@
 - `tests/test_stash.py`: unit test untuk parser murni `_parse_stash_entry()`.
 
 ### Ditambahkan (lanjutan)
+- **Distribusi via pip**: `pyproject.toml` (PEP 621, build-backend
+  setuptools) dengan `[project.scripts]` -> `github-manager =
+  modules.cli:main`. Ini mekanisme RESMI pip buat bikin CLI command -
+  beda total dari "postinstall hook" ala npm: pip generate script kecil
+  langsung `import` fungsi `main()` Python (bukan subprocess/shell),
+  shebang-nya otomatis dirapikan ke python venv yang benar. **pip TIDAK
+  PUNYA hook setelah-install sama sekali** (khususnya buat install dari
+  wheel, cara pip biasa fetch dari PyPI) - jadi gak ada versi
+  "postinstall.py" di sini, splash banner (lihat poin berikutnya) yang
+  jadi jaring pengamannya.
+- **Refactor `modules/cli.py`**: logic menu utama (dulu di
+  `github-manager.py`) dipindah ke sini supaya jadi SATU sumber
+  kebenaran yang dipakai baik oleh `python github-manager.py` (Termux/git
+  clone, sekarang cuma shim tipis) maupun entry point pip - gak ada
+  logic yang perlu disinkronkan manual di dua tempat. Diuji ulang
+  end-to-end: build wheel lokal, install ke venv bersih, command
+  `github-manager` jalan dan resolve `modules.cli:main` dengan benar.
+
+### Ditambahkan (lanjutan)
+- **Distribusi via npm**: `package.json` + `bin/github-manager` (shim yang
+  exec Python) + `scripts/postinstall.js`, jadi bisa `npm install -g
+  github-manager`. `.npmignore` ditambahkan supaya `__pycache__`/file
+  runtime gak ikut ke-publish.
+- **Splash banner sekali di run pertama (`modules/banner.py`)**: PENTING
+  - ini nutupin celah nyata yang saya temukan pas ngetes: npm (v7+)
+  **menyembunyikan output `postinstall` secara default** kecuali user
+  pakai `--foreground-scripts` (dites langsung: `npm install -g` biasa =
+  banner TIDAK muncul, cuma `--foreground-scripts` yang nampilinnya).
+  Karena hampir gak ada user yang pakai flag itu, banner scripts/postinstall.js
+  gak bisa diandalkan sendirian. Solusinya: `github-manager` sekarang
+  nampilin banner yang sama otomatis SEKALI di run pertama (state
+  `config['banner_shown']`), independen dari perilaku silent npm itu.
+  Juga bisa dipanggil manual: `github-manager --version` / `--help`.
+- **Bugfix kecil di banner**: teks `[OK]` yang direncanakan buat versi
+  Python awalnya bakal ditafsir `rich` sebagai style-tag (bukan teks
+  biasa) dan berisiko error render - diganti ke `✓` yang sudah jadi
+  konvensi konsisten di semua modul lain, ketahuan & diperbaiki sebelum
+  sempat dipakai.
+
+### Ditambahkan (lanjutan)
 - **Banner ASCII di akhir `install.sh`, gaya "poster"**: judul "GITHUB"
   (putih) terpisah dari blok huruf besar "MANAGER" (hijau), tagline,
   kotak info Version/Author + status "Installation completed", dan

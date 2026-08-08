@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+
+# Folder runtime - dibuat otomatis oleh ensure_dirs() saat app pertama
+# kali jalan, gak perlu ikut dipublish (isinya cuma .gitkeep + data lokal
+# user yang tidak relevan buat orang lain).
+config/*
+logs/*
+backup/*
+!config/.gitkeep
+!logs/.gitkeep
+!backup/.gitkeep
+
+*.tgz
+.gitignore
