@@ -1,6 +1,6 @@
 {
   "name": "github-cli-manager",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "GitHub Repository Manager CLI - kelola Git & GitHub lewat menu interaktif di Termux/Linux tanpa perlu hafal perintah Git.",
   "bin": {
     "github-manager": "./bin/github-manager"

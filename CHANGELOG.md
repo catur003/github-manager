@@ -1,5 +1,35 @@
 # Changelog GitHub Manager
 
+## v1.5.1 (Bugfix: Upload ZIP - wrapper detection tanpa opsi koreksi)
+
+### Diperbaiki (bug nyata, dilaporkan user)
+- **Upload ZIP: deteksi root project/wrapper yang "yakin" (bukan AMBIGU)
+  langsung final dipakai, TANPA user sempat lihat/koreksi.** Kasus
+  konkret yang salah: `_detect_zip_root()` punya daftar nama folder umum
+  (`app`, `src`, `pages`, dst di `_COMMON_PROJECT_DIRS`) yang otomatis
+  DIANGGAP BUKAN wrapper karena lazimnya itu struktur project asli (mis.
+  Next.js App Router). Tapi kalau folder wrapper ZIP-nya KEBETULAN
+  namanya sama (mis. `app/myrealproject/package.json` di mana `app/`
+  cuma wrapper biasa, bukan Next.js), heuristik ini salah nebak dan
+  sebelumnya user gak punya cara membetulkannya - `app/` ikut terekstrak
+  sebagai bagian dari repo, bukan cuma `myrealproject/`nya.
+- **Fix**: tambah `_confirm_or_override_root()` - SELALU tampilkan hasil
+  deteksi otomatis + tawarkan override manual (pilih folder mana pun di
+  dalam ZIP, sampai kedalaman 3 level, sebagai root), bukan cuma untuk
+  kasus yang sudah terdeteksi "AMBIGU" secara struktural seperti
+  sebelumnya. Default-nya tetap "pakai deteksi otomatis" (Enter langsung
+  lanjut) - jadi ZIP yang deteksinya sudah benar tidak nambah friksi
+  sama sekali, cuma nambah 1 konfirmasi.
+- Diuji dengan ZIP asli yang reproduksi persis kasusnya: `app/myrealproject/
+  package.json` di mana `app/` adalah wrapper murni (bukan Next.js) -
+  dikonfirmasi deteksi otomatis salah nebak `''` (0 wrapper), lalu
+  dikonfirmasi opsi override manual menyediakan `app/myrealproject`
+  (root yang benar) sebagai pilihan. Juga diuji ZIP tanpa wrapper sama
+  sekali untuk pastikan tidak ada regresi pada kasus normal.
+- Render tree ZIP Analyzer yang sebelumnya dobel-tampil (sekali di
+  langkah konfirmasi baru, sekali lagi setelahnya) dirapikan jadi
+  sekali saja.
+
 ## v1.5.0 (Fitur: Lihat Diff, Git Status per-file, Bugfix parsing)
 
 ### Ditambahkan

@@ -566,6 +566,56 @@ def _confirm_zip_changes(repo: str, branch: str, total_entries: int, root_prefix
 # Upload ZIP (Extract)
 # ---------------------------------------------------------------------------
 
+def _confirm_or_override_root(zip_path: str, root_prefix: str) -> Optional[str]:
+    """Tampilkan root project yang terdeteksi OTOMATIS dan minta konfirmasi
+    user, dengan opsi override manual kalau deteksinya salah.
+
+    BUGFIX: sebelumnya, begitu _detect_zip_root() menghasilkan jawaban
+    yang 'yakin' (bukan AMBIGU) - termasuk kasus folder wrapper yang
+    kebetulan namanya sama dengan folder project umum (app/, src/, dst di
+    _COMMON_PROJECT_DIRS, sehingga otomatis dianggap BUKAN wrapper) -
+    keputusan itu langsung final dipakai tanpa user sempat lihat/koreksi.
+    Kalau heuristiknya salah nebak untuk struktur ZIP yang gak biasa, user
+    gak punya cara membetulkannya - ini fungsi yang mengisi celah itu:
+    SELALU tampilkan hasil deteksi + tawarkan override manual, bukan cuma
+    untuk kasus yang sudah "AMBIGU" secara struktural.
+
+    Return root_prefix final (bisa "" untuk 0 wrapper), atau None kalau
+    user membatalkan."""
+    wrapper_chain = [c for c in root_prefix.split("/") if c] if root_prefix else []
+    label = root_prefix if root_prefix else "(root ZIP, tanpa wrapper)"
+
+    console.print(f"\n[cyan]Root project terdeteksi otomatis:[/cyan] {label}")
+    _render_zip_structure_tree(zip_path, wrapper_chain, ambiguous_children=None)
+    if wrapper_chain:
+        console.print(f"[dim](Folder wrapper yang akan dihapus saat ekstrak: {'/'.join(wrapper_chain)}/)[/dim]")
+
+    setuju = questionary.confirm("Gunakan deteksi otomatis ini sebagai Root Project?", default=True).ask()
+    if setuju is None:
+        return None
+    if setuju:
+        return root_prefix
+
+    # Override manual - kumpulkan semua path folder di dalam ZIP (dibatasi
+    # kedalaman 3 biar daftar pilihan gak kepanjangan/kepenuhan node_modules
+    # dkk), user pilih sendiri mana yang jadi root, atau pilih "0 wrapper".
+    with zipfile.ZipFile(zip_path, "r") as z:
+        namelist = z.namelist()
+    all_dirs = set()
+    for name in namelist:
+        parts = [p for p in name.split("/") if p]
+        for i in range(1, min(len(parts), 4)):
+            all_dirs.add("/".join(parts[:i]))
+
+    choices = ["(0 Wrapper - gunakan root ZIP apa adanya)"] + sorted(all_dirs) + ["Batal"]
+    pilihan = questionary.select("Pilih folder mana yang jadi Root Project:", choices=choices).ask()
+    if not pilihan or pilihan == "Batal":
+        return None
+    if pilihan.startswith("(0 Wrapper"):
+        return ""
+    return pilihan + "/"
+
+
 def upload_zip_extract() -> None:
     repo = _get_active_repo()
     if not repo:
@@ -627,12 +677,22 @@ def upload_zip_extract() -> None:
             root_prefix = ambiguous_prefix
         else:
             root_prefix = ambiguous_prefix + pilihan + "/"
+    else:
+        # Deteksi 'yakin' (bukan AMBIGU) - BUGFIX: dulu langsung dipakai
+        # tanpa user sempat lihat/koreksi. Sekarang selalu dikonfirmasi
+        # dulu, dengan opsi override manual kalau heuristiknya salah nebak
+        # (mis. folder wrapper kebetulan namanya 'app'/'src' dst, jadi
+        # otomatis dianggap bukan wrapper padahal di kasus ini memang wrapper).
+        confirmed = _confirm_or_override_root(zip_path, root_prefix)
+        if confirmed is None:
+            return
+        root_prefix = confirmed
 
     wrapper_chain = [c for c in root_prefix.split("/") if c] if root_prefix else []
 
-    # --- 2. ZIP Analyzer (tree + ringkasan) ---
-    console.print()
-    _render_zip_structure_tree(zip_path, wrapper_chain, ambiguous_children=None)
+    # --- 2. Ringkasan ZIP (tree sudah ditampilkan di langkah konfirmasi
+    # root di atas - baik lewat jalur AMBIGU maupun _confirm_or_override_root,
+    # jadi di sini cukup statistiknya saja, tidak perlu render tree lagi). ---
     console.print()
     _print_zip_stats(zip_path, wrapper_chain)
 
