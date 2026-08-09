@@ -30,6 +30,7 @@ perintah Git. Dibuat khusus agar nyaman dipakai di **Termux Android**
 ### Lewat npm (`npm install -g github-cli-manager`)
 
 ```bash
+npm install -g github-cli-manager
 ```
 
 Ini bakal:
@@ -51,7 +52,7 @@ Ini bakal:
 > sistem kamu (`pkg install python git` di Termux, atau
 > `apt install python3 git` di Linux).
 
-### Opsi C: Lewat Termux (clone + install.sh) - disarankan buat Termux
+### Opsi B: Lewat Termux (clone + install.sh) - disarankan buat Termux
 
 1. Pastikan Termux sudah terpasang dari F-Droid (disarankan, bukan Play Store).
 2. Download / clone folder project ini ke penyimpanan Termux.
