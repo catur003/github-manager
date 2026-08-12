@@ -318,7 +318,24 @@ def _detect_zip_root(zip_path: str) -> str:
         # wrapper - berhenti di sini supaya folder itu tidak ikut kestrip.
         only_dir = next(iter(dirs))
         if only_dir.lower() in _COMMON_PROJECT_DIRS:
-            return prefix
+            # BUGFIX: nama folder yang cocok _COMMON_PROJECT_DIRS TIDAK
+            # otomatis berarti folder itu struktur project asli. Cek dulu
+            # ISI-nya: kalau begitu masuk ke dalamnya cuma ketemu SATU
+            # folder tunggal lagi tanpa file penyeimbang (pola persis sama
+            # dengan pola wrapper yang lagi dideteksi di loop ini), itu
+            # tanda kuat folder ini SENDIRI cuma mata rantai wrapper lain
+            # yang KEBETULAN namanya sama dengan folder project umum (mis.
+            # wrapper ZIP bernama "app" yang isinya cuma "app/realproject/
+            # package.json") - bukan struktur Next.js App Router asli, yang
+            # biasanya langsung berisi banyak file/folder (page.js,
+            # layout.js, dst) di level itu juga. Kalau isinya memang
+            # >=1 file atau >=2 folder langsung di dalamnya, baru dianggap
+            # struktur project asli dan berhenti di sini (perilaku lama).
+            sub_dirs, sub_files = _entries_at(prefix + only_dir + "/")
+            if sub_files or len(sub_dirs) != 1:
+                return prefix
+            # Kalau tidak (cuma 1 folder tunggal, tanpa file) - lanjut turun
+            # apa adanya, jangan diproteksi jadi root palsu.
         prefix = prefix + only_dir + "/"
 
 

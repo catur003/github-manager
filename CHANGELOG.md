@@ -1,5 +1,37 @@
 # Changelog GitHub Manager
 
+## v1.5.2 (Bugfix: `_detect_zip_root()` masih salah deteksi untuk wrapper berantai bernama umum)
+
+### Diperbaiki (bug nyata, ditemukan lewat testing manual berbagai skenario wrapper)
+- **v1.5.1 cuma menambal gejalanya (selalu tampilkan layar konfirmasi),
+  bukan akar masalahnya** - `_detect_zip_root()` sendiri masih salah nebak
+  untuk kasus: folder wrapper ZIP yang KEBETULAN namanya cocok
+  `_COMMON_PROJECT_DIRS` (`app`, `src`, dst) DAN cuma berisi satu folder
+  tunggal tanpa file penyeimbang langsung di dalamnya - persis pola yang
+  sama dengan "rantai wrapper" biasa. Contoh: ZIP berisi
+  `app/realproject/package.json` di mana `app/` cuma wrapper kebetulan
+  (bukan Next.js App Router asli) - sebelumnya heuristik langsung berhenti
+  di `app/` dan menganggap `""` (0 wrapper) sebagai jawaban PALING PERCAYA
+  DIRI, ditampilkan sebagai default "Ya" di layar konfirmasi baru - kalau
+  user cuma pencet Enter (perilaku wajar buat kasus yang biasanya sudah
+  benar), `app/` ikut kebawa jadi folder nyata di hasil ekstrak, bukan cuma
+  `realproject/`-nya.
+- **Fix**: sebelum memutuskan berhenti di folder ber-nama-umum, sekarang
+  dicek dulu isinya - kalau ternyata folder itu SENDIRI cuma berisi satu
+  folder tunggal lain tanpa file (pola wrapper, bukan pola project asli
+  yang biasanya langsung punya banyak file/folder di level itu), deteksi
+  lanjut turun sampai ketemu level yang benar-benar berisi file. Kalau
+  folder ber-nama-umum itu memang berisi file langsung (`src/index.js`,
+  `src/utils.js`) atau lebih dari satu subfolder, tetap dianggap struktur
+  project asli seperti sebelumnya (tidak ada regresi kasus Next.js App
+  Router).
+- Diuji dengan 18 skenario ZIP buatan sendiri (0 wrapper, 1 level, 2-3
+  level nested, campuran nama umum berantai, folder umum asli dengan file
+  langsung, folder umum asli dengan >1 subfolder, kasus AMBIGU + resolusi
+  via marker, marker nyempil di kedalaman lain) - seluruhnya lolos.
+  Layar konfirmasi/override dari v1.5.1 tetap dipertahankan sebagai lapis
+  keamanan kedua, bukan pengganti fix ini.
+
 ## v1.5.1 (Bugfix: Upload ZIP - wrapper detection tanpa opsi koreksi)
 
 ### Diperbaiki (bug nyata, dilaporkan user)
