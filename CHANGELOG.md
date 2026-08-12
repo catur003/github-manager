@@ -1,5 +1,16 @@
 # Changelog GitHub Manager
 
+## v1.5.3 (Bugfix: `APP_VERSION` di utils.py ketinggalan, tidak sinkron dengan package.json)
+
+### Diperbaiki
+- **`modules/utils.py` punya konstanta `APP_VERSION` terpisah dari
+  `package.json`/`pyproject.toml`** - banner dan `github-manager --version`
+  baca dari konstanta ini, bukan dari `package.json`. Waktu v1.5.2
+  dipublish ke npm, konstanta ini kelewat kebawa tetap `"1.5.1"`, jadi
+  CLI yang sudah kepasang fix wrapper detection tetap nampilin
+  "Version : 1.5.1" - menyesatkan walau isinya sudah benar. Fix ini
+  cuma sinkronisasi angka versi, tidak ada perubahan logic.
+
 ## v1.5.2 (Bugfix: `_detect_zip_root()` masih salah deteksi untuk wrapper berantai bernama umum)
 
 ### Diperbaiki (bug nyata, ditemukan lewat testing manual berbagai skenario wrapper)
