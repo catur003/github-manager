@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kebijakan Privasi - RepoFlow Mobile</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; max-width: 720px; margin: 0 auto; padding: 32px 20px 80px; line-height: 1.6; color: #1a1a1a; }
+  h1 { font-size: 26px; margin-bottom: 4px; }
+  .updated { color: #666; font-size: 14px; margin-bottom: 32px; }
+  h2 { font-size: 19px; margin-top: 36px; border-bottom: 2px solid #eee; padding-bottom: 6px; }
+  ul { padding-left: 22px; }
+  li { margin-bottom: 8px; }
+  .todo { background: #fff3cd; border: 1px solid #ffe69c; padding: 10px 14px; border-radius: 6px; margin: 16px 0; font-size: 14px; }
+  a { color: #0969da; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 14px; }
+  th, td { border: 1px solid #ddd; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #f6f8fa; }
+</style>
+</head>
+<body>
+
+<h1>Kebijakan Privasi RepoFlow Mobile</h1>
+<p class="updated">Terakhir diperbarui: 13 Agustus 2026</p>
+
+<p>
+  RepoFlow Mobile ("Aplikasi") adalah aplikasi klien GitHub yang memungkinkan
+  pengguna melihat, mengedit, dan mengelola repository GitHub langsung dari
+  perangkat mobile. Kebijakan ini menjelaskan data apa saja yang diproses
+  Aplikasi dan bagaimana data tersebut ditangani.
+</p>
+
+<h2>1. Data yang Diproses Aplikasi</h2>
+<table>
+  <tr><th>Data</th><th>Disimpan di mana</th><th>Dikirim ke mana</th></tr>
+  <tr>
+    <td>Personal Access Token GitHub</td>
+    <td>Hanya di perangkat pengguna (terenkripsi, lewat Android Keystore /
+      iOS Keychain)</td>
+    <td>Langsung ke GitHub API (api.github.com) untuk setiap aksi
+      (lihat/edit/commit file) - tidak pernah melewati atau tersimpan di
+      server milik pengembang Aplikasi</td>
+  </tr>
+  <tr>
+    <td>Isi repository (nama file, isi file, riwayat commit, dll)</td>
+    <td>Tidak disimpan permanen - diambil langsung dari GitHub API saat
+      dibutuhkan</td>
+    <td>Tetap antara perangkat pengguna dan GitHub API</td>
+  </tr>
+  <tr>
+    <td>Preferensi aplikasi (tema, pengaturan tampilan)</td>
+    <td>Hanya di perangkat pengguna (penyimpanan lokal biasa)</td>
+    <td>Tidak dikirim ke mana pun</td>
+  </tr>
+  <tr>
+    <td>Data periklanan (identifier perangkat, interaksi iklan)</td>
+    <td>Diproses oleh Google AdMob</td>
+    <td>Google (lihat bagian Pihak Ketiga di bawah)</td>
+  </tr>
+</table>
+
+<p>
+  <strong>Penting:</strong> Aplikasi ini tidak memiliki server backend milik
+  sendiri yang menyimpan data pengguna. Semua interaksi repository (lihat,
+  edit, commit, buat Pull Request, dll) terjadi langsung antara perangkat
+  pengguna dan GitHub API menggunakan token yang dimasukkan pengguna sendiri.
+  Pengembang Aplikasi tidak memiliki akses ke token atau isi repository
+  pengguna.
+</p>
+
+<h2>2. Pihak Ketiga yang Terlibat</h2>
+<ul>
+  <li>
+    <strong>GitHub, Inc.</strong> - Aplikasi berkomunikasi langsung dengan
+    GitHub REST API untuk semua fitur inti. Penggunaan data oleh GitHub
+    tunduk pada
+    <a href="https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement" target="_blank">Kebijakan Privasi GitHub</a>.
+  </li>
+  <li>
+    <strong>Google AdMob</strong> - Aplikasi menampilkan iklan banner dan
+    interstisial melalui Google AdMob. AdMob dapat mengumpulkan identifier
+    perangkat dan data interaksi iklan untuk keperluan penayangan dan
+    personalisasi iklan. Lihat
+    <a href="https://policies.google.com/privacy" target="_blank">Kebijakan Privasi Google</a>
+    dan
+    <a href="https://support.google.com/admob/answer/6128543" target="_blank">bagaimana Google menggunakan data dari partner</a>.
+  </li>
+</ul>
+
+<h2>3. Izin yang Digunakan Aplikasi</h2>
+<ul>
+  <li><strong>Akses internet</strong> - untuk berkomunikasi dengan GitHub API dan menampilkan iklan.</li>
+  <li><strong>Akses penyimpanan/file</strong> - untuk memilih file atau arsip ZIP yang akan diunggah ke repository.</li>
+</ul>
+<p>Aplikasi tidak meminta akses kamera, mikrofon, lokasi, atau kontak.</p>
+
+<h2>4. Keamanan Data</h2>
+<p>
+  Token GitHub disimpan menggunakan penyimpanan terenkripsi bawaan sistem
+  operasi (Android Keystore / iOS Keychain), bukan penyimpanan biasa yang
+  bisa dibaca aplikasi lain. Pengguna dapat menghapus token kapan saja
+  melalui fitur "Keluar dari Akun" di dalam Aplikasi, yang akan menghapus
+  token tersebut sepenuhnya dari perangkat.
+</p>
+
+<h2>5. Hak Pengguna</h2>
+<ul>
+  <li>Pengguna dapat menghapus token GitHub yang tersimpan kapan saja lewat fitur "Keluar dari Akun".</li>
+  <li>Menghapus Aplikasi dari perangkat akan menghapus seluruh data lokal (token, preferensi, cache).</li>
+  <li>Untuk mengontrol data periklanan, pengguna dapat mengatur preferensi iklan lewat pengaturan Google di perangkat masing-masing (Setelan &gt; Google &gt; Iklan).</li>
+</ul>
+
+<h2>6. Anak-Anak</h2>
+<p>
+  Aplikasi ini tidak ditujukan untuk anak-anak di bawah 13 tahun dan tidak
+  secara sengaja mengumpulkan data dari anak-anak.
+</p>
+
+<h2>7. Perubahan Kebijakan</h2>
+<p>
+  Kebijakan ini dapat diperbarui sewaktu-waktu. Perubahan akan tercermin
+  pada tanggal "Terakhir diperbarui" di bagian atas halaman ini.
+</p>
+
+<h2>8. Kontak</h2>
+<p>
+  Pertanyaan seputar kebijakan privasi ini dapat dikirim ke:
+  <strong>caturpamungkas103@gmail.com</strong>
+</p>
+
+</body>
+</html>
