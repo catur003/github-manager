@@ -1,6 +1,6 @@
 # File runtime yang berubah tiap kali app dijalankan - JANGAN di-commit.
 # Kalau ini ikut ke-track, checkout/pindah branch bisa gagal karena git
-# nolak menimpa perubahan lokal yang belum di-commit di file ini.
+# nolak menimpa perubahan lokal yang belum di-commit di file ini ok.
 config/config.json
 logs/*.log
 backup/*.zip
